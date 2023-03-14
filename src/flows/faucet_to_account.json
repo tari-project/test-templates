@@ -74,7 +74,8 @@
                         "connections": [
                             {
                                 "node": 4,
-                                "output": "default"
+                                "output": "default",
+                                "data": {}
                             }
                         ]
                     },
@@ -94,7 +95,8 @@
                         "connections": [
                             {
                                 "node": 3,
-                                "input": "self"
+                                "input": "self",
+                                "data": {}
                             }
                         ]
                     }
