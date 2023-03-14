@@ -1,0 +1,100 @@
+{
+    "id": "flow_to_account@0.1.0",
+    "args": {
+        "faucet": {
+            "type": "component"
+        },
+        "account": {
+            "type": "component"
+        }
+    },
+    "nodes": {
+        "1": {
+            "id": "1",
+            "name": "call_method",
+            "data": {
+                "template": "0x1bd141dcdc5e5441acc9568041dc417557fe85ce03934ed29dcaf0f4e44e7d6d",
+                "method": "take_free_coins"
+            },
+            "inputs": {
+                "self": {
+                    "connections": [
+                        {
+                            "node": "2",
+                            "output": "default",
+                            "data": {}
+                        }
+                    ]
+                }
+            },
+            "outputs": {
+                "default": {
+                    "connections": [
+                        {
+                            "node": "3",
+                            "input": "bucket",
+                            "data": {}
+                        }
+                    ]
+                }
+            }
+        },
+        "2": {
+            "id": "2",
+            "name": "args",
+            "data": {
+                "name": "faucet_component"
+            },
+            "inputs": {},
+            "outputs": {
+                "default": {
+                    "connections": [
+                        {
+                            "node": "1",
+                            "input": "self",
+                            "data": {}
+                        }
+                    ]
+                }
+            }
+        },
+        "3": {
+            "id": "3",
+            "name": "call_method",
+            "data": {
+                "template": "0x0000000000000000000000000000000000000000000000000000000000000000",
+                "method": "deposit"
+            },
+            "inputs": {
+                "self": {
+                    "connections": [
+                        {
+                            "node": "4",
+                            "output": "default"
+                        }
+                    ]
+                },
+                "bucket": {
+                    "connections": []
+                }
+            }
+        },
+        "4": {
+            "id": "4",
+            "name": "args",
+            "data": {
+                "name": "account"
+            },
+            "outputs": {
+                "default": {
+                    "connections": [
+                        {
+                            "node": "3",
+                            "input": "self"
+                        }
+                    ]
+                }
+            }
+        }
+    }
+}
