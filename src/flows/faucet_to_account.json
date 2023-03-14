@@ -3,12 +3,10 @@
     "args": [
         {
             "name": "faucet",
-            // "type": "component"
             "type": "string"
         },
         {
             "name": "account",
-            // "type": "component"
             "type": "string"
         }
     ],
