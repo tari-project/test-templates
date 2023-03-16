@@ -3,11 +3,11 @@
     "args": [
         {
             "name": "faucet_component",
-            "type": "string"
+            "type": "bytes"
         },
         {
             "name": "account",
-            "type": "string"
+            "type": "bytes"
         }
     ],
     "flow": {
