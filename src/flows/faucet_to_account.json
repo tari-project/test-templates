@@ -15,7 +15,7 @@
         "nodes": {
             "1": {
                 "id": 1,
-                "name": "call_method",
+                "name": "tari::dan::call_method",
                 "data": {
                     "template": "0x1bd141dcdc5e5441acc9568041dc417557fe85ce03934ed29dcaf0f4e44e7d6d",
                     "method": "take_free_coins"
@@ -45,7 +45,7 @@
             },
             "2": {
                 "id": 2,
-                "name": "args",
+                "name": "tari::arg",
                 "data": {
                     "name": "faucet_component"
                 },
@@ -64,7 +64,7 @@
             },
             "3": {
                 "id": 3,
-                "name": "call_method",
+                "name": "tari::dan::call_method",
                 "data": {
                     "template": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "method": "deposit"
@@ -86,7 +86,7 @@
             },
             "4": {
                 "id": 4,
-                "name": "args",
+                "name": "tari::arg",
                 "data": {
                     "name": "account"
                 },
