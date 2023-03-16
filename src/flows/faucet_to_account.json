@@ -2,7 +2,7 @@
     "name": "flow_to_account",
     "args": [
         {
-            "name": "faucet",
+            "name": "faucet_component",
             "type": "string"
         },
         {
@@ -88,7 +88,7 @@
                 "id": 4,
                 "name": "tari::arg",
                 "data": {
-                    "name": "account"
+                    "name": "account",
                 },
                 "outputs": {
                     "default": {
