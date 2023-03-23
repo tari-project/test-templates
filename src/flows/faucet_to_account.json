@@ -17,7 +17,7 @@
                 "id": 1,
                 "name": "tari::dan::call_method",
                 "data": {
-                    "template": "0x1bd141dcdc5e5441acc9568041dc417557fe85ce03934ed29dcaf0f4e44e7d6d",
+                    "template": "0xa3bb10b1838084f13248349bb61d171478735dc5b9681b01bbf459f2c360b369",
                     "method": "take_free_coins"
                 },
                 "inputs": {
