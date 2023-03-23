@@ -80,7 +80,13 @@
                         ]
                     },
                     "bucket": {
-                        "connections": []
+                        "connections": [
+                            {
+                                "node": 1,
+                                "output": "default",
+                                "data": {}
+                            }
+                        ]
                     }
                 }
             },
