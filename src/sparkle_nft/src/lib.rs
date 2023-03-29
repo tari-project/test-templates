@@ -44,8 +44,7 @@ mod sparkle_nft_template {
                 (NonFungibleId::from_string("Sparkle1"), (&(), &())),
                 (NonFungibleId::from_u256([0u8; 32]), (&(), &())),
             ];
-            let bucket = ResourceBuilder::non_fungible()
-                .with_token_symbol("SPKL")
+            let bucket = ResourceBuilder::non_fungible("SPKL")
                 .with_non_fungibles(tokens)
                 .build_bucket();
 
@@ -67,10 +66,17 @@ mod sparkle_nft_template {
             let mut immutable_data = Metadata::new();
             immutable_data
                 .insert("name", format!("Sparkle{}", id))
-                .insert("image_url", format!("https://nft.storage/sparkle{}.png", id));
+                .insert(
+                    "image_url",
+                    format!("https://nft.storage/sparkle{}.png", id),
+                );
 
             // Mint the NFT, this will fail if the token ID already exists
-            ResourceManager::get(self.address).mint_non_fungible(id, &immutable_data, &Sparkle { brightness: 0 })
+            ResourceManager::get(self.address).mint_non_fungible(
+                id,
+                &immutable_data,
+                &Sparkle { brightness: 0 },
+            )
         }
 
         pub fn total_supply(&self) -> Amount {
@@ -80,7 +86,10 @@ mod sparkle_nft_template {
         pub fn inc_brightness(&mut self, id: NonFungibleId, brightness: u32) {
             debug(format!("Increase brightness on {} by {}", id, brightness));
             self.with_sparkle_mut(id, |data| {
-                data.brightness = data.brightness.checked_add(brightness).expect("Brightness overflow");
+                data.brightness = data
+                    .brightness
+                    .checked_add(brightness)
+                    .expect("Brightness overflow");
             });
         }
 
@@ -120,7 +129,11 @@ mod sparkle_nft_template {
                 bucket.resource_address() == self.address,
                 "Cannot burn bucket not from this collection"
             );
-            debug(format!("Burning bucket {} containing {}", bucket.id(), bucket.amount()));
+            debug(format!(
+                "Burning bucket {} containing {}",
+                bucket.id(),
+                bucket.amount()
+            ));
             // This is all that's required, typically the template would not need to include a burn function because a
             // native instruction can be used instead
             bucket.burn();
