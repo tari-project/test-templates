@@ -7,7 +7,7 @@ use tari_template_test_tooling::TemplateTest;
 use tari_transaction::Transaction;
 
 #[test]
-fn it_mints() {
+fn it_compiles() {
     let TestSetup {
         mut test,
         marketplace_component,

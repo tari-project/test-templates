@@ -21,7 +21,21 @@
 //   USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use tari_template_lib::prelude::*;
+use tari_template_lib::Hash;
+
 use std::collections::BTreeMap;
+use std::str::FromStr;
+
+/// TODO: create constant in template_lib for account template address (and other builtin templates)
+pub const ACCOUNT_TEMPLATE_ADDRESS: Hash = Hash::from_array([0u8; 32]);
+
+// the immutable field name on the seller badges used to reference which nft is being sold
+// used to allow the seller the option to cancel
+// TODO: there should be only one metadata field needed (for the whole NonFungibleAddress)
+//       but there is no easy way to parse back the whole address string into a NonFungibleAddress
+//       so here we workaround by storing the resource and the id separately
+pub const SELLER_BADGE_RESOURCE_FIELD: &str = "resource";
+pub const SELLER_BADGE_ID_FIELD: &str = "id";
 
 /// Simple English-like auctions
 /// The winner needs to claim the nft after the bidding period finishes. For simplicity, no marketplace fees are
@@ -59,8 +73,8 @@ pub struct Auction {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Bid {
-    address: ComponentAddress,
-    bid: Vault,
+    bidder_account: ComponentAddress,
+    vault: Vault,
 }
 
 #[template]
@@ -84,6 +98,16 @@ mod nft_marketplace {
             }
         }
 
+        pub fn get_auction(&self, nft_address: NonFungibleAddress) -> Option<Auction> {
+            self.auctions.get(&nft_address).cloned()
+        }
+
+        // convenience method for external APIs and interfaces
+        // TODO: support for advanced filtering (price ranges, auctions about to end, etc.) could be desirable
+        pub fn get_auctions(&self) -> BTreeMap<NonFungibleAddress, Auction> {
+            self.auctions.clone()
+        }  
+
         // returns a badge used to cancel the sell order in the future
         // the badge will contain immutable metadata referencing the nft being sold
         pub fn start_auction(
@@ -106,6 +130,9 @@ mod nft_marketplace {
 
             assert!(epoch_period > 0, "Invalid auction period");
 
+            // needed to ensure that we can process the auction when it ends
+            Self::assert_component_is_account(seller_address);
+
             let auction = Auction {
                 vault: Vault::from_bucket(nft_bucket),
                 seller_address,
@@ -126,9 +153,146 @@ mod nft_marketplace {
             let badge_id = NonFungibleId::random();
             // the data MUST be immutable, to avoid security exploits (changing the nft which it points to afterwards)
             let mut immutable_data = Metadata::new();
-            immutable_data.insert("nft_address", nft_address.to_string());
+            immutable_data.insert(SELLER_BADGE_RESOURCE_FIELD, nft_resource.to_string());
+            immutable_data.insert(SELLER_BADGE_ID_FIELD, nft_id.to_string());
             ResourceManager::get(self.seller_badge_resource)
                 .mint_non_fungible(badge_id, &immutable_data, &())
+        }
+
+        // process a new bid for an ongoing auction
+        pub fn bid(&mut self, bidder_account_address: ComponentAddress, nft_address: NonFungibleAddress, payment: Bucket) {
+            let auction = self.auctions.get_mut(&nft_address).expect("Auction does not exist");
+
+            assert!(Consensus::current_epoch() < auction.ending_epoch, "Auction has expired");
+
+            assert_eq!(
+                payment.resource_address(),
+                XTR2,
+                "Invalid payment resource, the marketplace only accepts Tari (XTR2) tokens"
+            );
+
+            // validate that the bidder account is really an account
+            // so we can deposit the refund later if a higher bidder comes
+            // otherwise an attacker could block newer higher bids 
+            Self::assert_component_is_account(bidder_account_address);
+
+            // check that the minimum price (if set) is met
+            if let Some(min_price) = auction.min_price {
+                assert!(payment.amount() >= min_price, "Minimum price not met");
+            }
+
+            // immediatly refund the previous highest bidder if there is one
+            if let Some(highest_bid) = &mut auction.highest_bid {
+                assert!(
+                    payment.amount() > highest_bid.vault.balance(),
+                    "There is a higher bid placed"
+                );
+                let previous_bidder_account = ComponentManager::get(highest_bid.bidder_account);
+                let refund_bucket = highest_bid.vault.withdraw_all();
+                // TODO: improve call method generics when there is no return value
+                previous_bidder_account.call::<_,()>("deposit".to_string(), args![refund_bucket]);
+            }
+
+            // set the new highest bid
+            let new_higest_bid = Bid {
+                bidder_account: bidder_account_address,
+                vault: Vault::from_bucket(payment.clone()),
+            };
+            auction.highest_bid = Some(new_higest_bid);
+
+            // if the bid meets the buying price, we process the sell immediatly
+            if let Some(buy_price) = auction.buy_price {
+                assert!(payment.amount() <= buy_price, "Payment exceeds the buying price");
+                if payment.amount() == buy_price {
+                    self.process_auction_payments(nft_address);
+                }
+            }
+        }
+
+        // finish the auction by sending the NFT and payment to the respective accounts
+        // used by a bid seller to receive the bid payment, or by the buyer to get the NFT, whatever happens first
+        pub fn finish_auction(&mut self, nft_address: NonFungibleAddress) {
+            let auction = self.auctions.get_mut(&nft_address).expect("Auction does not exist");
+
+            assert!(
+                Consensus::current_epoch() >= auction.ending_epoch,
+                "Auction is still in progress"
+            );
+
+            self.process_auction_payments(nft_address);
+        }
+
+        // the seller wants to cancel the auction
+        pub fn cancel_auction(&mut self, seller_badge_bucket: Bucket) {
+            // we check that the badge has been created by the marketplace
+            assert!(
+                seller_badge_bucket.resource_address() == self.seller_badge_resource,
+                "Invalid seller badge resource"
+            );
+
+            // the seller badge references the corresponding nft address in its immutable data
+            // TODO: we need a more convenient method in the template_lib to extract NFT data from a bucket
+            let seller_badge_id = &seller_badge_bucket.get_non_fungible_ids()[0];
+            let seller_badge = ResourceManager::get(self.seller_badge_resource).get_non_fungible(&seller_badge_id);
+            let nft_metadata = seller_badge.get_data::<Metadata>();
+            let nft_resource_str = nft_metadata.get(SELLER_BADGE_RESOURCE_FIELD)
+                .expect("Invalid seller badge: No NFT resource field in metadata");
+            let nft_resource = ResourceAddress::from_str(&nft_resource_str)
+                .expect("Invalid seller badge: Invalid NFT resource field in metadata");
+            let nft_id_str = nft_metadata.get(SELLER_BADGE_ID_FIELD)
+                .expect("Invalid seller badge: No NFT id field in metadata");
+            let nft_id = NonFungibleId::try_from_string(nft_id_str)
+                .expect("Invalid seller badge: Invalid NFT id field in metadata");
+            let nft_address = NonFungibleAddress::new(nft_resource, nft_id);
+            let auction = self.auctions.get_mut(&nft_address)
+                .expect("Auction does not exist");
+
+            // an auction cannot be cancelled if it has ended
+            assert!(Consensus::current_epoch() < auction.ending_epoch, "Auction has ended");
+
+            // we are canceling the bid
+            // so we need to pay back the highest bidded (if there's one)
+            if let Some(highest_bid) = &mut auction.highest_bid {
+                let bidder_account = ComponentManager::get(highest_bid.bidder_account);
+                let refund_bucket = highest_bid.vault.withdraw_all();
+                bidder_account.call::<_,()>("deposit".to_string(), args![refund_bucket]);
+                auction.highest_bid = None;
+            }
+
+            // at this point there is no bidder
+            // so the payment process will just send the NFT back to the seller
+            self.process_auction_payments(nft_address);
+        }
+
+        fn assert_component_is_account(component_address: ComponentAddress) {
+            let component = ComponentManager::get(component_address);
+            assert!(component.get_template_address() == ACCOUNT_TEMPLATE_ADDRESS, "Invalid bidder account");
+        }
+
+        // this method MUST ALWAYS be private, to prevent auction cancellation by unauthorized third parties
+        fn process_auction_payments(&mut self, nft_address: NonFungibleAddress) {
+            let auction = self.auctions.get_mut(&nft_address).expect("Auction does not exist");
+
+            let seller_account = ComponentManager::get(auction.seller_address);
+            let nft_bucket = auction.vault.withdraw_all();
+
+            if let Some(highest_bid) = &mut auction.highest_bid {
+                // deposit the nft to the bidder
+                let bidder_account = ComponentManager::get(highest_bid.bidder_account);
+                bidder_account.call::<_,()>("deposit".to_string(), args![nft_bucket]);
+
+                // deposit the funds to the seller
+                let payment = highest_bid.vault.withdraw_all();
+                seller_account.call::<_,()>("deposit".to_string(), args![payment]);
+            } else {
+                // no bidders in the auction, so just return the NFT to the seller
+                seller_account.call::<_,()>("deposit".to_string(), args![nft_bucket]);
+            }
+
+            // TODO: burn the seller badge to avoid it being used again
+
+            // remove the auction
+            self.auctions.remove(&nft_address);
         }
     }
 }
