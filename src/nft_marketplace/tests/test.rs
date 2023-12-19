@@ -20,102 +20,64 @@ fn auction_period_ends_with_winning_bid() {
     let TestSetup {
         mut test,
         marketplace_component,
-        seller_account,
-        seller_owner_token,
-        seller_key,
+        seller,
         seller_nft_address,
         ..
     } = setup();
 
     // create an auction for the NFT
-    let epoch_period: u64 = 10;
-    let min_price: Option<Amount> = None;
-    let buy_price: Option<Amount> = None;
-    let result = test.execute_expect_success(
-        Transaction::builder()
-            .call_method(seller_account, "withdraw", args![seller_nft_address.resource_address(), Amount(1)])
-            .put_last_instruction_output_on_workspace("nft_bucket")
-            .call_method(marketplace_component, "start_auction", args![Workspace("nft_bucket"), seller_account, min_price, buy_price, epoch_period])
-            .put_last_instruction_output_on_workspace("seller_badge")
-            .call_method(seller_account, "deposit", args![Workspace("seller_badge")])
-            .sign(&seller_key)
-            .build(),
-        vec![seller_owner_token.clone()],
-    );
-    let output = test.get_previous_output_address(SubstateType::NonFungible);
-    let seller_badge = output.as_non_fungible_address().unwrap().clone();
+    let auction = AuctionRequest {
+        marketplace: marketplace_component,
+        seller: seller.clone(),
+        nft: seller_nft_address.clone(),
+        min_price: None,
+        buy_price: None,
+        epoch_period: 10,
+    };
+    let _seller_badge = create_auction(&mut test, &auction);
 
     // store the seller account balance for later checks
-    let result = test.execute_expect_success(
-        Transaction::builder()
-            .call_method(seller_account, "balance", args![XTR2])
-            .sign(&seller_key)
-            .build(),
-        vec![seller_owner_token.clone()],
-    );
-    let seller_balance = result.finalize.execution_results[0].decode::<Amount>().unwrap();
+    let seller_balance = get_account_balance(&mut test, &seller);
 
-    // place a valid bid
-    let (bidder1_account, bidder1_owner_token, bidder1_key) = test.create_owned_account();
-    let bidder1_bid = Amount(100);
-    let result = test.execute_expect_success(
-        Transaction::builder()
-            .call_method(bidder1_account, "withdraw", args![XTR2, bidder1_bid])
-            .put_last_instruction_output_on_workspace("payment")
-            .call_method(marketplace_component, "bid", args![bidder1_account, seller_nft_address, Workspace("payment")])
-            .call_method(bidder1_account, "balance", args![XTR2])
-            .sign(&bidder1_key)
-            .build(),
-        vec![bidder1_owner_token.clone()],
-    );
-    let bidder1_balance = result.finalize.execution_results[3].decode::<Amount>().unwrap();
+    // place a bid
+    let bidder1 = create_account(&mut test);
+    let bid1 = BidRequest {
+        marketplace: marketplace_component,
+        bidder: bidder1.clone(),
+        nft: seller_nft_address.clone(),
+        bid: Amount(100),
+    };
+    bid(&mut test, &bid1);
+    let bidder1_balance = get_account_balance(&mut test, &bidder1);
 
     // place a higher bid 
-    let (bidder2_account, bidder2_owner_token, bidder2_key) = test.create_owned_account();
-    let bidder2_bid = Amount(200);
-    let result = test.execute_expect_success(
-        Transaction::builder()
-            .call_method(bidder2_account, "withdraw", args![XTR2, bidder2_bid])
-            .put_last_instruction_output_on_workspace("payment")
-            .call_method(marketplace_component, "bid", args![bidder2_account, seller_nft_address, Workspace("payment")])
-            .sign(&bidder2_key)
-            .build(),
-        vec![bidder2_owner_token.clone()],
-    );
+    let bidder2 = create_account(&mut test);
+    let bid2 = BidRequest {
+        marketplace: marketplace_component,
+        bidder: bidder2.clone(),
+        nft: seller_nft_address.clone(),
+        bid: Amount(200),
+    };
+    bid(&mut test, &bid2);
 
     // bidder2 is now the highest bidder, so the previous bid must have been refunded to bidder1
-    let result = test.execute_expect_success(
-        Transaction::builder()
-            .call_method(bidder1_account, "balance", args![XTR2])
-            .sign(&bidder1_key)
-            .build(),
-        vec![bidder1_owner_token.clone()],
-    );
-    let bidder1_balance_after_refund = result.finalize.execution_results[0].decode::<Amount>().unwrap();
-    assert_eq!(bidder1_balance_after_refund, bidder1_balance + bidder1_bid);
+    let bidder1_balance_after_refund = get_account_balance(&mut test, &bidder1);
+    assert_eq!(bidder1_balance_after_refund, bidder1_balance + bid1.bid);
 
     // advance the epoch so the auction period expires
-    test.set_virtual_substate(VirtualSubstateAddress::CurrentEpoch, VirtualSubstate::CurrentEpoch(epoch_period + 1));
+    set_epoch(&mut test, auction.epoch_period + 1);
 
     // the winning bidder (bidder2) withdraws the NFT
-    let result = test.execute_expect_success(
-        Transaction::builder()
-            .call_method(marketplace_component, "finish_auction", args![seller_nft_address])
-            .sign(&bidder2_key)
-            .build(),
-        vec![bidder2_owner_token.clone()],
-    );
+    let finish = FinishRequest {
+        marketplace: marketplace_component,
+        account: bidder2.clone(),
+        nft: seller_nft_address.clone(),
+    };
+    finish_auction(&mut test, &finish);
 
     // the seller received the bid payment
-    let result = test.execute_expect_success(
-        Transaction::builder()
-            .call_method(seller_account, "balance", args![XTR2])
-            .sign(&seller_key)
-            .build(),
-        vec![seller_owner_token.clone()],
-    );
-    let seller_balance_after_sell = result.finalize.execution_results[0].decode::<Amount>().unwrap();
-    assert_eq!(seller_balance_after_sell, seller_balance + bidder2_bid);
+    let seller_balance_after_sell = get_account_balance(&mut test, &seller);
+    assert_eq!(seller_balance_after_sell, seller_balance + bid2.bid);
 }
 
 // TODO: auction_period_ends_with_no_winning_bid
@@ -126,12 +88,17 @@ fn auction_period_ends_with_winning_bid() {
 // TODO: it_rejects_invalid_auction_withdrawals
 // TODO: it_rejects_invalid_auction_cancellations
 
+#[derive(Clone, Debug)]
+struct Account {
+    pub component: ComponentAddress,
+    pub owner_token: NonFungibleAddress,
+    pub key: RistrettoSecretKey,
+}
+
 struct TestSetup {
     test: TemplateTest,
     marketplace_component: ComponentAddress,
-    seller_account: ComponentAddress,
-    seller_owner_token: NonFungibleAddress,
-    seller_key: RistrettoSecretKey,
+    seller: Account,
     seller_badge_resource: ResourceAddress,
     seller_nft_address: NonFungibleAddress,
 }
@@ -141,15 +108,20 @@ fn setup() -> TestSetup {
 
     // create the seller account
     let (seller_account, seller_owner_token, seller_key) = test.create_owned_account();
+    let seller = Account {
+        component: seller_account,
+        owner_token: seller_owner_token,
+        key: seller_key
+    };
     
     // create the NFT marketplace component
     let template = test.get_template_address("NftMarketplace");
     let result = test.execute_expect_success(
         Transaction::builder()
             .call_function(template, "new", args![])
-            .sign(&seller_key)
+            .sign(&seller.key)
             .build(),
-        vec![seller_owner_token.clone()],
+        vec![seller.owner_token.clone()],
     );
     let marketplace_component = result.finalize.execution_results[0]
         .decode::<ComponentAddress>()
@@ -167,24 +139,24 @@ fn setup() -> TestSetup {
     let account_nft_template = test.get_template_address("AccountNonFungible");
     let result = test.execute_expect_success(
         Transaction::builder()
-            .call_function(account_nft_template, "create", args![seller_owner_token])
-            .sign(&seller_key)
+            .call_function(account_nft_template, "create", args![seller.owner_token])
+            .sign(&seller.key)
             .build(),
-        vec![seller_owner_token.clone()],
+        vec![seller.owner_token.clone()],
     );
     let account_nft_component = result.finalize.execution_results[0].decode::<ComponentAddress>().unwrap();
 
     let mut nft_metadata = Metadata::new();
     nft_metadata.insert("name".to_string(), "my_custom_nft".to_string());
 
-    let result = test.execute_expect_success(
+    test.execute_expect_success(
         Transaction::builder()
             .call_method(account_nft_component, "mint", args![nft_metadata])
             .put_last_instruction_output_on_workspace("nft_bucket")
-            .call_method(seller_account, "deposit", args![Workspace("nft_bucket")])
-            .sign(&seller_key)
+            .call_method(seller.component, "deposit", args![Workspace("nft_bucket")])
+            .sign(&seller.key)
             .build(),
-        vec![seller_owner_token.clone()],
+        vec![seller.owner_token.clone()],
     );
     let output = test.get_previous_output_address(SubstateType::NonFungible);
     let seller_nft_address = output.as_non_fungible_address().unwrap().clone();
@@ -192,10 +164,99 @@ fn setup() -> TestSetup {
     TestSetup {
         test,
         marketplace_component,
-        seller_account,
-        seller_owner_token,
-        seller_key,
+        seller,
         seller_badge_resource,
         seller_nft_address,
     }
+}
+
+fn create_account(test: &mut TemplateTest) -> Account {
+    let (component, owner_token, key) = test.create_owned_account();
+    Account { component, owner_token, key }
+}
+
+fn get_account_balance(test: &mut TemplateTest, account: &Account) -> Amount {
+    let result = test.execute_expect_success(
+        Transaction::builder()
+            .call_method(account.component, "balance", args![XTR2])
+            .sign(&account.key)
+            .build(),
+        vec![account.owner_token.clone()],
+    );
+    let balance = result.finalize.execution_results[0].decode::<Amount>().unwrap();
+    balance
+}
+
+#[derive(Clone, Debug)]
+struct AuctionRequest {
+    marketplace: ComponentAddress,
+    seller: Account,
+    nft: NonFungibleAddress,
+    min_price: Option<Amount>,
+    buy_price: Option<Amount>,
+    epoch_period: u64,
+}
+
+// returns the seller badge
+fn create_auction(test: &mut TemplateTest, req: &AuctionRequest) -> NonFungibleAddress {
+    test.execute_expect_success(
+        Transaction::builder()
+            .call_method(req.seller.component, "withdraw", args![req.nft.resource_address(), Amount(1)])
+            .put_last_instruction_output_on_workspace("nft_bucket")
+            .call_method(req.marketplace, "start_auction", args![
+                Workspace("nft_bucket"),
+                req.seller.component,
+                req.min_price,
+                req.buy_price,
+                req.epoch_period])
+            .put_last_instruction_output_on_workspace("seller_badge")
+            .call_method(req.seller.component, "deposit", args![Workspace("seller_badge")])
+            .sign(&req.seller.key)
+            .build(),
+        vec![req.seller.owner_token.clone()],
+    );
+    let output = test.get_previous_output_address(SubstateType::NonFungible);
+    let seller_badge = output.as_non_fungible_address().unwrap().clone();
+    seller_badge
+}
+
+#[derive(Clone, Debug)]
+struct BidRequest {
+    marketplace: ComponentAddress,
+    bidder: Account,
+    nft: NonFungibleAddress,
+    bid: Amount,
+}
+
+fn bid(test: &mut TemplateTest, req: &BidRequest) {
+    test.execute_expect_success(
+        Transaction::builder()
+            .call_method(req.bidder.component, "withdraw", args![XTR2, req.bid])
+            .put_last_instruction_output_on_workspace("payment")
+            .call_method(req.marketplace, "bid", args![req.bidder.component, req.nft, Workspace("payment")])
+            .sign(&req.bidder.key)
+            .build(),
+        vec![req.bidder.owner_token.clone()],
+    );
+}
+
+fn set_epoch(test: &mut TemplateTest, new_epoch: u64) {
+    test.set_virtual_substate(VirtualSubstateAddress::CurrentEpoch, VirtualSubstate::CurrentEpoch(new_epoch));
+}
+
+#[derive(Clone, Debug)]
+struct FinishRequest {
+    marketplace: ComponentAddress,
+    account: Account,
+    nft: NonFungibleAddress,
+}
+
+fn finish_auction(test: &mut TemplateTest, req: &FinishRequest) {
+    test.execute_expect_success(
+        Transaction::builder()
+            .call_method(req.marketplace, "finish_auction", args![req.nft])
+            .sign(&req.account.key)
+            .build(),
+        vec![req.account.owner_token.clone()],
+    );
 }
