@@ -1510,6 +1510,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "tari_bor",
+ "tari_engine_types",
  "tari_template_lib",
  "tari_template_test_tooling",
  "tari_transaction",

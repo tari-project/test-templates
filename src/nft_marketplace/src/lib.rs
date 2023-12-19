@@ -87,15 +87,22 @@ mod nft_marketplace {
     }
 
     impl NftMarketplace {
-        pub fn new() -> Self {
-            Self {
-                auctions: BTreeMap::new(),
-                seller_badge_resource: ResourceBuilder::non_fungible()
+        pub fn new() -> Component<NftMarketplace> {
+            let component_access_rules = AccessRules::new()
+                .default(AccessRule::AllowAll);
+            let auctions = BTreeMap::new();
+            let seller_badge_resource = ResourceBuilder::non_fungible()
                     // TODO: proper access control. Is it possible to allow only this component to mint&burn? 
                     .mintable(AccessRule::AllowAll)
-                    .burnable(AccessRule::DenyAll)
-                    .build(),
-            }
+                    .burnable(AccessRule::AllowAll)
+                    .build();
+
+            Component::new(Self {
+                auctions,
+                seller_badge_resource
+            })
+                .with_access_rules(component_access_rules)
+                .create()
         }
 
         pub fn get_auction(&self, nft_address: NonFungibleAddress) -> Option<Auction> {
@@ -191,14 +198,18 @@ mod nft_marketplace {
                 let refund_bucket = highest_bid.vault.withdraw_all();
                 // TODO: improve call method generics when there is no return value
                 previous_bidder_account.call::<_,()>("deposit".to_string(), args![refund_bucket]);
-            }
 
-            // set the new highest bid
-            let new_higest_bid = Bid {
-                bidder_account: bidder_account_address,
-                vault: Vault::from_bucket(payment.clone()),
-            };
-            auction.highest_bid = Some(new_higest_bid);
+                // update the highest bidder in the auction
+                highest_bid.bidder_account = bidder_account_address;
+                highest_bid.vault.deposit(payment.clone());
+            } else {
+                // the bidder is the first one to place a bid
+                let highest_bid = Bid {
+                    bidder_account: bidder_account_address,
+                    vault: Vault::from_bucket(payment.clone()),
+                };
+                auction.highest_bid = Some(highest_bid);
+            }
 
             // if the bid meets the buying price, we process the sell immediatly
             if let Some(buy_price) = auction.buy_price {
@@ -291,8 +302,8 @@ mod nft_marketplace {
 
             // TODO: burn the seller badge to avoid it being used again
 
-            // remove the auction
-            self.auctions.remove(&nft_address);
+            // TODO: we cannot remove the auction because the network does not allow to delete the auction vault (OrphanedSubstate)
+            // self.auctions.remove(&nft_address);
         }
     }
 }

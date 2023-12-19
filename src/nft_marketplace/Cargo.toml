@@ -16,6 +16,7 @@ serde = { version = "1.0", default-features = false, features = ["derive"] }
 tari_template_test_tooling = { path = "../../../tari-dan/dan_layer/template_test_tooling" }
 tari_transaction = { path = "../../../tari-dan/dan_layer/transaction" }
 tari_bor = { path = "../../../tari-dan/dan_layer/tari_bor" }
+tari_engine_types = { path = "../../../tari-dan/dan_layer/engine_types" }
 
 [profile.release]
 opt-level = 's'     # Optimize for size.
