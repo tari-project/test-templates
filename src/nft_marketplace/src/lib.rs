@@ -161,7 +161,7 @@ mod nft_marketplace {
             // the data MUST be immutable, to avoid security exploits (changing the nft which it points to afterwards)
             let mut immutable_data = Metadata::new();
             immutable_data.insert(SELLER_BADGE_RESOURCE_FIELD, nft_resource.to_string());
-            immutable_data.insert(SELLER_BADGE_ID_FIELD, nft_id.to_string());
+            immutable_data.insert(SELLER_BADGE_ID_FIELD, nft_id.to_canonical_string());
             ResourceManager::get(self.seller_badge_resource)
                 .mint_non_fungible(badge_id, &immutable_data, &())
         }
@@ -184,14 +184,15 @@ mod nft_marketplace {
             Self::assert_component_is_account(bidder_account_address);
 
             // check that the minimum price (if set) is met
+            let payment_amount = payment.amount();
             if let Some(min_price) = auction.min_price {
-                assert!(payment.amount() >= min_price, "Minimum price not met");
+                assert!(payment_amount >= min_price, "Minimum price not met");
             }
 
             // immediatly refund the previous highest bidder if there is one
             if let Some(highest_bid) = &mut auction.highest_bid {
                 assert!(
-                    payment.amount() > highest_bid.vault.balance(),
+                    payment_amount > highest_bid.vault.balance(),
                     "There is a higher bid placed"
                 );
                 let previous_bidder_account = ComponentManager::get(highest_bid.bidder_account);
@@ -212,9 +213,9 @@ mod nft_marketplace {
             }
 
             // if the bid meets the buying price, we process the sell immediatly
-            if let Some(buy_price) = auction.buy_price {
-                assert!(payment.amount() <= buy_price, "Payment exceeds the buying price");
-                if payment.amount() == buy_price {
+            if let Some(buy_price) = auction.buy_price {     
+                assert!(payment_amount <= buy_price, "Payment exceeds the buying price");
+                if payment_amount == buy_price {
                     self.process_auction_payments(nft_address);
                 }
             }
@@ -252,7 +253,7 @@ mod nft_marketplace {
                 .expect("Invalid seller badge: Invalid NFT resource field in metadata");
             let nft_id_str = nft_metadata.get(SELLER_BADGE_ID_FIELD)
                 .expect("Invalid seller badge: No NFT id field in metadata");
-            let nft_id = NonFungibleId::try_from_string(nft_id_str)
+            let nft_id = NonFungibleId::try_from_canonical_string(nft_id_str)
                 .expect("Invalid seller badge: Invalid NFT id field in metadata");
             let nft_address = NonFungibleAddress::new(nft_resource, nft_id);
             let auction = self.auctions.get_mut(&nft_address)
@@ -267,12 +268,18 @@ mod nft_marketplace {
                 let bidder_account = ComponentManager::get(highest_bid.bidder_account);
                 let refund_bucket = highest_bid.vault.withdraw_all();
                 bidder_account.call::<_,()>("deposit".to_string(), args![refund_bucket]);
-                auction.highest_bid = None;
+                // TODO: removing the bid ends up in a OrphanedSubstate error in the 
+                //       but we need to mark that the auction is finished somehow to prevent new bids
+                // auction.highest_bid = None;
             }
 
-            // at this point there is no bidder
-            // so the payment process will just send the NFT back to the seller
-            self.process_auction_payments(nft_address);
+            // burn the seller token
+            seller_badge_bucket.burn();
+
+            // send the NFT back to the seller
+            let seller_account = ComponentManager::get(auction.seller_address);
+            let nft_bucket = auction.vault.withdraw_all();
+            seller_account.call::<_,()>("deposit".to_string(), args![nft_bucket]);
         }
 
         fn assert_component_is_account(component_address: ComponentAddress) {

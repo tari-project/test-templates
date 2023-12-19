@@ -37,7 +37,7 @@ fn auction_period_ends_with_winning_bid() {
     let _seller_badge = create_auction(&mut test, &auction);
 
     // store the seller account balance for later checks
-    let seller_balance = get_account_balance(&mut test, &seller);
+    let seller_balance = get_account_tari_balance(&mut test, &seller);
 
     // place a bid
     let bidder1 = create_account(&mut test);
@@ -48,7 +48,7 @@ fn auction_period_ends_with_winning_bid() {
         bid: Amount(100),
     };
     bid(&mut test, &bid1);
-    let bidder1_balance = get_account_balance(&mut test, &bidder1);
+    let bidder1_balance = get_account_tari_balance(&mut test, &bidder1);
 
     // place a higher bid 
     let bidder2 = create_account(&mut test);
@@ -61,7 +61,7 @@ fn auction_period_ends_with_winning_bid() {
     bid(&mut test, &bid2);
 
     // bidder2 is now the highest bidder, so the previous bid must have been refunded to bidder1
-    let bidder1_balance_after_refund = get_account_balance(&mut test, &bidder1);
+    let bidder1_balance_after_refund = get_account_tari_balance(&mut test, &bidder1);
     assert_eq!(bidder1_balance_after_refund, bidder1_balance + bid1.bid);
 
     // advance the epoch so the auction period expires
@@ -76,15 +76,154 @@ fn auction_period_ends_with_winning_bid() {
     finish_auction(&mut test, &finish);
 
     // the seller received the bid payment
-    let seller_balance_after_sell = get_account_balance(&mut test, &seller);
+    let seller_balance_after_sell = get_account_tari_balance(&mut test, &seller);
     assert_eq!(seller_balance_after_sell, seller_balance + bid2.bid);
 }
 
-// TODO: auction_period_ends_with_no_winning_bid
-// TODO: auction_finishes_by_buying_price_bid
-// TODO: auction_cancelled_by_seller
+#[test]
+fn auction_period_ends_with_no_winning_bid() {
+    let TestSetup {
+        mut test,
+        marketplace_component,
+        seller,
+        seller_nft_address,
+        ..
+    } = setup();
+
+    // create an auction for the NFT
+    let auction = AuctionRequest {
+        marketplace: marketplace_component,
+        seller: seller.clone(),
+        nft: seller_nft_address.clone(),
+        min_price: None,
+        buy_price: None,
+        epoch_period: 10,
+    };
+    let _seller_badge = create_auction(&mut test, &auction);
+
+    // the NFT is no longer in the seller's account
+    let seller_nft_balance = get_account_balance(&mut test, &seller, &seller_nft_address.resource_address());
+    assert_eq!(seller_nft_balance, Amount(0));
+
+    // advance the epoch so the auction period expires
+    set_epoch(&mut test, auction.epoch_period + 1);
+
+    // the seller withdraws the NFT
+    let finish = FinishRequest {
+        marketplace: marketplace_component,
+        account: seller.clone(),
+        nft: seller_nft_address.clone(),
+    };
+    finish_auction(&mut test, &finish);
+
+    // the nft has been deposited into the seller again
+    let seller_nft_balance = get_account_balance(&mut test, &seller, &seller_nft_address.resource_address());
+    assert_eq!(seller_nft_balance, Amount(1));
+}
+
+#[test]
+fn auction_finishes_by_buying_price_bid() {
+    let TestSetup {
+        mut test,
+        marketplace_component,
+        seller,
+        seller_nft_address,
+        ..
+    } = setup();
+
+    // create an auction for the NFT
+    let buy_price = Amount(100);
+    let auction = AuctionRequest {
+        marketplace: marketplace_component,
+        seller: seller.clone(),
+        nft: seller_nft_address.clone(),
+        min_price: None,
+        buy_price: Some(buy_price),
+        epoch_period: 10,
+    };
+    let _seller_badge = create_auction(&mut test, &auction);
+
+    // store the seller account balance for later checks
+    let seller_balance = get_account_tari_balance(&mut test, &seller);
+
+    // place a bid that matches the buying price of the NFT
+    let bidder1 = create_account(&mut test);
+    let bid1 = BidRequest {
+        marketplace: marketplace_component,
+        bidder: bidder1.clone(),
+        nft: seller_nft_address.clone(),
+        bid: buy_price,
+    };
+    bid(&mut test, &bid1);
+
+    // Notice that we DON'T advace the epoch period
+    // so the Auction has not expired
+
+    // the bidder received the NFT, because he paid the buy price
+
+    // the seller received the bid payment
+    let seller_balance_after_sell = get_account_tari_balance(&mut test, &seller);
+    assert_eq!(seller_balance_after_sell, seller_balance + buy_price);
+}
+
+#[test]
+fn auction_cancelled_by_seller() {
+    let TestSetup {
+        mut test,
+        marketplace_component,
+        seller,
+        seller_nft_address,
+        ..
+    } = setup();
+
+    // create an auction for the NFT
+    let auction = AuctionRequest {
+        marketplace: marketplace_component,
+        seller: seller.clone(),
+        nft: seller_nft_address.clone(),
+        min_price: None,
+        buy_price: None,
+        epoch_period: 10,
+    };
+    let seller_badge = create_auction(&mut test, &auction);
+
+    // store the seller account balance for later checks
+    let seller_balance = get_account_tari_balance(&mut test, &seller);
+
+    // place a bid that matches the buying price of the NFT
+    let bidder1 = create_account(&mut test);
+    let bid1 = BidRequest {
+        marketplace: marketplace_component,
+        bidder: bidder1.clone(),
+        nft: seller_nft_address.clone(),
+        bid: Amount(100),
+    };
+    bid(&mut test, &bid1);
+    let bidder1_balance = get_account_tari_balance(&mut test, &bidder1);
+
+    // Notice that we DON'T advance the epoch period
+    // so the Auction has not expired
+
+    // the seller cancels the NFT
+    let finish = CancelRequest {
+        marketplace: marketplace_component,
+        account: seller.clone(),
+        nft: seller_nft_address.clone(),
+        seller_badge: seller_badge.clone()
+    };
+    cancel_auction(&mut test, &finish);
+
+    // the nft has been deposited into the seller again
+    let seller_nft_balance = get_account_balance(&mut test, &seller, &seller_nft_address.resource_address());
+    assert_eq!(seller_nft_balance, Amount(1));
+
+    // the existing bid has been refunded
+    let bidder1_balance_after_cancel = get_account_tari_balance(&mut test, &bidder1);
+    assert_eq!(bidder1_balance_after_cancel, bidder1_balance + bid1.bid);
+}
+
 // TODO: it_rejects_invalid_auctions
-// TODO: it_rejects_invalid_bids
+// TODO: it_rejects_invalid_bids (included finished/canceled auctions)
 // TODO: it_rejects_invalid_auction_withdrawals
 // TODO: it_rejects_invalid_auction_cancellations
 
@@ -175,16 +314,20 @@ fn create_account(test: &mut TemplateTest) -> Account {
     Account { component, owner_token, key }
 }
 
-fn get_account_balance(test: &mut TemplateTest, account: &Account) -> Amount {
+fn get_account_balance(test: &mut TemplateTest, account: &Account, resource: &ResourceAddress) -> Amount {
     let result = test.execute_expect_success(
         Transaction::builder()
-            .call_method(account.component, "balance", args![XTR2])
+            .call_method(account.component, "balance", args![resource])
             .sign(&account.key)
             .build(),
         vec![account.owner_token.clone()],
     );
     let balance = result.finalize.execution_results[0].decode::<Amount>().unwrap();
     balance
+}
+
+fn get_account_tari_balance(test: &mut TemplateTest, account: &Account) -> Amount {
+    return get_account_balance(test, account, &XTR2);
 }
 
 #[derive(Clone, Debug)]
@@ -255,6 +398,29 @@ fn finish_auction(test: &mut TemplateTest, req: &FinishRequest) {
     test.execute_expect_success(
         Transaction::builder()
             .call_method(req.marketplace, "finish_auction", args![req.nft])
+            .sign(&req.account.key)
+            .build(),
+        vec![req.account.owner_token.clone()],
+    );
+}
+
+#[derive(Clone, Debug)]
+struct CancelRequest {
+    marketplace: ComponentAddress,
+    account: Account,
+    nft: NonFungibleAddress,
+    seller_badge: NonFungibleAddress,
+}
+
+fn cancel_auction(test: &mut TemplateTest, req: &CancelRequest) {
+    test.execute_expect_success(
+        Transaction::builder()
+            .call_method(req.account.component, "withdraw_non_fungible", args![
+                req.seller_badge.resource_address(),
+                req.seller_badge.id()
+            ])
+            .put_last_instruction_output_on_workspace("seller_badge")
+            .call_method(req.marketplace, "cancel_auction", args![Workspace("seller_badge")])
             .sign(&req.account.key)
             .build(),
         vec![req.account.owner_token.clone()],
