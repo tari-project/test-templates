@@ -416,8 +416,62 @@ fn it_rejects_invalid_bids() {
     assert_reject_reason(reason, "Auction has expired");
 }
 
+#[test]
+fn it_rejects_invalid_auction_finish() {
+    let TestSetup {
+        mut test,
+        marketplace_component,
+        account_nft_component,
+        seller,
+        seller_nft_address,
+        ..
+    } = setup();
 
-// TODO: it_rejects_invalid_auction_withdrawals
+    // reject if the auction does not exist
+    let bidder = create_account(&mut test);
+    let reason = test.execute_expect_failure(
+        Transaction::builder()
+            .call_method(marketplace_component, "finish_auction", args![seller_nft_address])
+            .sign(&bidder.key)
+            .build(),
+        vec![bidder.owner_token.clone()],
+    );
+    assert_reject_reason(reason, "Auction does not exist");
+
+    // let's publish a valid auction for the rest of the asserts
+    let min_price = Amount(100);
+    let buy_price = Amount(500);
+    let auction_period = 10;
+    let auction = AuctionRequest {
+        marketplace: marketplace_component,
+        seller: seller.clone(),
+        nft: seller_nft_address.clone(),
+        min_price: Some(min_price),
+        buy_price: Some(buy_price),
+        epoch_period: auction_period,
+    };
+    let seller_badge = create_auction(&mut test, &auction);
+
+    // let's make the bidder win the auction
+    let bid_req = BidRequest {
+        marketplace: marketplace_component,
+        bidder: bidder.clone(),
+        nft: seller_nft_address.clone(),
+        bid: min_price + 1,
+    };
+    bid(&mut test, &bid_req);
+
+    // the auction period has not ended yet, so the bidder should not be able to finish
+    let reason = test.execute_expect_failure(
+        Transaction::builder()
+            .call_method(marketplace_component, "finish_auction", args![seller_nft_address])
+            .sign(&bidder.key)
+            .build(),
+        vec![bidder.owner_token.clone()],
+    );
+    assert_reject_reason(reason, "Auction is still in progress");
+}
+
 // TODO: it_rejects_invalid_auction_cancellations
 
 #[derive(Clone, Debug)]
