@@ -8,6 +8,7 @@ use tari_template_test_tooling::TemplateTest;
 use tari_transaction::Transaction;
 use tari_template_lib::prelude::Metadata;
 use tari_template_test_tooling::SubstateType;
+use tari_template_test_tooling::support::assert_error::assert_reject_reason;
 
 use tari_engine_types::{
     virtual_substate::{VirtualSubstate, VirtualSubstateAddress},
@@ -222,7 +223,97 @@ fn auction_cancelled_by_seller() {
     assert_eq!(bidder1_balance_after_cancel, bidder1_balance + bid1.bid);
 }
 
-// TODO: it_rejects_invalid_auctions
+#[test]
+fn it_rejects_invalid_auctions() {
+    let TestSetup {
+        mut test,
+        marketplace_component,
+        account_nft_component,
+        seller,
+        seller_nft_address,
+        ..
+    } = setup();
+
+    // reject if resource is not an nft
+    // we test it by trying to auction a Tari fungible token
+    let reason = test.execute_expect_failure(
+        Transaction::builder()
+        .call_method(seller.component, "withdraw", args![XTR2, Amount(1)]) // invalid resource
+        .put_last_instruction_output_on_workspace("nft_bucket")
+        .call_method(marketplace_component, "start_auction", args![
+            Workspace("nft_bucket"),
+            seller.component,
+            None::<Amount>,
+            None::<Amount>,
+            10])
+        .put_last_instruction_output_on_workspace("seller_badge")
+        .call_method(seller.component, "deposit", args![Workspace("seller_badge")])
+        .sign(&seller.key)
+        .build(),
+        vec![seller.owner_token.clone()],
+    );
+    assert_reject_reason(reason, "The resource is not a NFT");
+
+    // reject if multiple nfts in the bucket
+    mint_account_nft(&mut test, &seller, &account_nft_component);
+    let reason = test.execute_expect_failure(
+        Transaction::builder()
+        .call_method(seller.component, "withdraw", args![seller_nft_address.resource_address(), Amount(2)]) // invalid bucket
+        .put_last_instruction_output_on_workspace("nft_bucket")
+        .call_method(marketplace_component, "start_auction", args![
+            Workspace("nft_bucket"),
+            seller.component,
+            None::<Amount>,
+            None::<Amount>,
+            10])
+        .put_last_instruction_output_on_workspace("seller_badge")
+        .call_method(seller.component, "deposit", args![Workspace("seller_badge")])
+        .sign(&seller.key)
+        .build(),
+        vec![seller.owner_token.clone()],
+    );
+    assert_reject_reason(reason, "Can only start an auction of a single NFT");
+
+    // reject if the auction period is invalid
+    let reason = test.execute_expect_failure(
+        Transaction::builder()
+        .call_method(seller.component, "withdraw", args![seller_nft_address.resource_address(), Amount(1)])
+        .put_last_instruction_output_on_workspace("nft_bucket")
+        .call_method(marketplace_component, "start_auction", args![
+            Workspace("nft_bucket"),
+            seller.component,
+            None::<Amount>,
+            None::<Amount>,
+            0]) // invalid period
+        .put_last_instruction_output_on_workspace("seller_badge")
+        .call_method(seller.component, "deposit", args![Workspace("seller_badge")])
+        .sign(&seller.key)
+        .build(),
+        vec![seller.owner_token.clone()],
+    );
+    assert_reject_reason(reason, "Invalid auction period");
+
+    // reject if the seller account is not an account component
+    let reason = test.execute_expect_failure(
+        Transaction::builder()
+        .call_method(seller.component, "withdraw", args![seller_nft_address.resource_address(), Amount(1)])
+        .put_last_instruction_output_on_workspace("nft_bucket")
+        .call_method(marketplace_component, "start_auction", args![
+            Workspace("nft_bucket"),
+            account_nft_component, // invalid component, it's not an account
+            None::<Amount>,
+            None::<Amount>,
+            10])
+        .put_last_instruction_output_on_workspace("seller_badge")
+        .call_method(seller.component, "deposit", args![Workspace("seller_badge")])
+        .sign(&seller.key)
+        .build(),
+        vec![seller.owner_token.clone()],
+    );
+    assert_reject_reason(reason, "Invalid bidder account");
+}
+
+
 // TODO: it_rejects_invalid_bids (included finished/canceled auctions)
 // TODO: it_rejects_invalid_auction_withdrawals
 // TODO: it_rejects_invalid_auction_cancellations
@@ -236,6 +327,7 @@ struct Account {
 
 struct TestSetup {
     test: TemplateTest,
+    account_nft_component: ComponentAddress,
     marketplace_component: ComponentAddress,
     seller: Account,
     seller_badge_resource: ResourceAddress,
@@ -284,25 +376,12 @@ fn setup() -> TestSetup {
         vec![seller.owner_token.clone()],
     );
     let account_nft_component = result.finalize.execution_results[0].decode::<ComponentAddress>().unwrap();
-
-    let mut nft_metadata = Metadata::new();
-    nft_metadata.insert("name".to_string(), "my_custom_nft".to_string());
-
-    test.execute_expect_success(
-        Transaction::builder()
-            .call_method(account_nft_component, "mint", args![nft_metadata])
-            .put_last_instruction_output_on_workspace("nft_bucket")
-            .call_method(seller.component, "deposit", args![Workspace("nft_bucket")])
-            .sign(&seller.key)
-            .build(),
-        vec![seller.owner_token.clone()],
-    );
-    let output = test.get_previous_output_address(SubstateType::NonFungible);
-    let seller_nft_address = output.as_non_fungible_address().unwrap().clone();
+    let seller_nft_address = mint_account_nft(&mut test, &seller, &account_nft_component);
 
     TestSetup {
         test,
         marketplace_component,
+        account_nft_component,
         seller,
         seller_badge_resource,
         seller_nft_address,
@@ -328,6 +407,24 @@ fn get_account_balance(test: &mut TemplateTest, account: &Account, resource: &Re
 
 fn get_account_tari_balance(test: &mut TemplateTest, account: &Account) -> Amount {
     return get_account_balance(test, account, &XTR2);
+}
+
+fn mint_account_nft(test: &mut TemplateTest, account: &Account, account_nft_component: &ComponentAddress) -> NonFungibleAddress {
+    let mut nft_metadata = Metadata::new();
+    nft_metadata.insert("name".to_string(), "my_custom_nft".to_string());
+
+    test.execute_expect_success(
+        Transaction::builder()
+            .call_method(*account_nft_component, "mint", args![nft_metadata])
+            .put_last_instruction_output_on_workspace("nft_bucket")
+            .call_method(account.component, "deposit", args![Workspace("nft_bucket")])
+            .sign(&account.key)
+            .build(),
+        vec![account.owner_token.clone()],
+    );
+    let output = test.get_previous_output_address(SubstateType::NonFungible);
+    let minted_nft_address = output.as_non_fungible_address().unwrap().clone();
+    minted_nft_address
 }
 
 #[derive(Clone, Debug)]
