@@ -313,8 +313,110 @@ fn it_rejects_invalid_auctions() {
     assert_reject_reason(reason, "Invalid bidder account");
 }
 
+#[test]
+fn it_rejects_invalid_bids() {
+    let TestSetup {
+        mut test,
+        marketplace_component,
+        account_nft_component,
+        seller,
+        seller_nft_address,
+        ..
+    } = setup();
 
-// TODO: it_rejects_invalid_bids (included finished/canceled auctions)
+    // reject if the auction does not exist
+    let bidder = create_account(&mut test);
+    let reason = test.execute_expect_failure(
+        Transaction::builder()
+            .call_method(bidder.component, "withdraw", args![XTR2, Amount(200)])
+            .put_last_instruction_output_on_workspace("payment")
+            .call_method(marketplace_component, "bid", args![bidder.component, seller_nft_address, Workspace("payment")])
+            .sign(&bidder.key)
+            .build(),
+        vec![bidder.owner_token.clone()],
+    );
+    assert_reject_reason(reason, "Auction does not exist");
+
+    // lets publish a valid auction for the rest of the asserts
+    let min_price = Amount(100);
+    let buy_price = Amount(500);
+    let auction_period = 10;
+    let auction = AuctionRequest {
+        marketplace: marketplace_component,
+        seller: seller.clone(),
+        nft: seller_nft_address.clone(),
+        min_price: Some(min_price),
+        buy_price: Some(buy_price),
+        epoch_period: auction_period,
+    };
+    let seller_badge = create_auction(&mut test, &auction);
+
+    // reject if the payment is not in Tari
+    let bidder_nft_component = create_account_nft_component(&mut test, &bidder);
+    let bidder_nft_address = mint_account_nft(&mut test, &bidder, &bidder_nft_component);
+    let reason = test.execute_expect_failure(
+        Transaction::builder()
+            .call_method(bidder.component, "withdraw", args![bidder_nft_address.resource_address(), Amount(1)])
+            .put_last_instruction_output_on_workspace("payment")
+            .call_method(marketplace_component, "bid", args![bidder.component, seller_nft_address, Workspace("payment")])
+            .sign(&bidder.key)
+            .build(),
+        vec![bidder.owner_token.clone()],
+    );
+    assert_reject_reason(reason, "Invalid payment resource, the marketplace only accepts Tari (XTR2) tokens");
+
+    // reject if buy price is too low
+    let reason = test.execute_expect_failure(
+        Transaction::builder()
+            .call_method(bidder.component, "withdraw", args![XTR2, min_price-1])
+            .put_last_instruction_output_on_workspace("payment")
+            .call_method(marketplace_component, "bid", args![bidder.component, seller_nft_address, Workspace("payment")])
+            .sign(&bidder.key)
+            .build(),
+        vec![bidder.owner_token.clone()],
+    );
+    assert_reject_reason(reason, "Minimum price not met");
+
+    // reject if buy price is too high (higher than the buy price)
+    let reason = test.execute_expect_failure(
+        Transaction::builder()
+            .call_method(bidder.component, "withdraw", args![XTR2, buy_price+1])
+            .put_last_instruction_output_on_workspace("payment")
+            .call_method(marketplace_component, "bid", args![bidder.component, seller_nft_address, Workspace("payment")])
+            .sign(&bidder.key)
+            .build(),
+        vec![bidder.owner_token.clone()],
+    );
+    assert_reject_reason(reason, "Payment exceeds the buying price");
+
+    // reject if the bidder account is not an account component
+    let reason = test.execute_expect_failure(
+        Transaction::builder()
+            .call_method(bidder.component, "withdraw", args![XTR2, Amount(1)])
+            .put_last_instruction_output_on_workspace("payment")
+            // using the bidder's nft component address instead of its account
+            .call_method(marketplace_component, "bid", args![bidder_nft_component, seller_nft_address, Workspace("payment")])
+            .sign(&bidder.key)
+            .build(),
+        vec![bidder.owner_token.clone()],
+    );
+    assert_reject_reason(reason, "Invalid bidder account");
+
+    // reject if the auction has expired
+    set_epoch(&mut test, auction_period + 1);
+    let reason = test.execute_expect_failure(
+        Transaction::builder()
+            .call_method(bidder.component, "withdraw", args![XTR2, min_price+1])
+            .put_last_instruction_output_on_workspace("payment")
+            .call_method(marketplace_component, "bid", args![bidder.component, seller_nft_address, Workspace("payment")])
+            .sign(&bidder.key)
+            .build(),
+        vec![bidder.owner_token.clone()],
+    );
+    assert_reject_reason(reason, "Auction has expired");
+}
+
+
 // TODO: it_rejects_invalid_auction_withdrawals
 // TODO: it_rejects_invalid_auction_cancellations
 
@@ -367,15 +469,7 @@ fn setup() -> TestSetup {
         .expect("seller_badge_resource not found");
 
     // create a new account NFT that the seller is going to put on sale
-    let account_nft_template = test.get_template_address("AccountNonFungible");
-    let result = test.execute_expect_success(
-        Transaction::builder()
-            .call_function(account_nft_template, "create", args![seller.owner_token])
-            .sign(&seller.key)
-            .build(),
-        vec![seller.owner_token.clone()],
-    );
-    let account_nft_component = result.finalize.execution_results[0].decode::<ComponentAddress>().unwrap();
+    let account_nft_component = create_account_nft_component(&mut test, &seller);
     let seller_nft_address = mint_account_nft(&mut test, &seller, &account_nft_component);
 
     TestSetup {
@@ -407,6 +501,19 @@ fn get_account_balance(test: &mut TemplateTest, account: &Account, resource: &Re
 
 fn get_account_tari_balance(test: &mut TemplateTest, account: &Account) -> Amount {
     return get_account_balance(test, account, &XTR2);
+}
+
+fn create_account_nft_component(test: &mut TemplateTest, account: &Account) -> ComponentAddress {
+    let account_nft_template = test.get_template_address("AccountNonFungible");
+    let result = test.execute_expect_success(
+        Transaction::builder()
+            .call_function(account_nft_template, "create", args![account.owner_token])
+            .sign(&account.key)
+            .build(),
+        vec![account.owner_token.clone()],
+    );
+    let account_nft_component = result.finalize.execution_results[0].decode::<ComponentAddress>().unwrap();
+    account_nft_component
 }
 
 fn mint_account_nft(test: &mut TemplateTest, account: &Account, account_nft_component: &ComponentAddress) -> NonFungibleAddress {
