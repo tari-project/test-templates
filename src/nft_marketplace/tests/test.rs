@@ -188,9 +188,6 @@ fn auction_cancelled_by_seller() {
     };
     let seller_badge = create_auction(&mut test, &auction);
 
-    // store the seller account balance for later checks
-    let seller_balance = get_account_tari_balance(&mut test, &seller);
-
     // place a bid that matches the buying price of the NFT
     let bidder1 = create_account(&mut test);
     let bid1 = BidRequest {
@@ -209,7 +206,6 @@ fn auction_cancelled_by_seller() {
     let finish = CancelRequest {
         marketplace: marketplace_component,
         account: seller.clone(),
-        nft: seller_nft_address.clone(),
         seller_badge: seller_badge.clone()
     };
     cancel_auction(&mut test, &finish);
@@ -318,7 +314,6 @@ fn it_rejects_invalid_bids() {
     let TestSetup {
         mut test,
         marketplace_component,
-        account_nft_component,
         seller,
         seller_nft_address,
         ..
@@ -349,7 +344,7 @@ fn it_rejects_invalid_bids() {
         buy_price: Some(buy_price),
         epoch_period: auction_period,
     };
-    let seller_badge = create_auction(&mut test, &auction);
+    create_auction(&mut test, &auction);
 
     // reject if the payment is not in Tari
     let bidder_nft_component = create_account_nft_component(&mut test, &bidder);
@@ -421,7 +416,6 @@ fn it_rejects_invalid_auction_finish() {
     let TestSetup {
         mut test,
         marketplace_component,
-        account_nft_component,
         seller,
         seller_nft_address,
         ..
@@ -450,7 +444,7 @@ fn it_rejects_invalid_auction_finish() {
         buy_price: Some(buy_price),
         epoch_period: auction_period,
     };
-    let seller_badge = create_auction(&mut test, &auction);
+    create_auction(&mut test, &auction);
 
     // let's make the bidder win the auction
     let bid_req = BidRequest {
@@ -472,7 +466,61 @@ fn it_rejects_invalid_auction_finish() {
     assert_reject_reason(reason, "Auction is still in progress");
 }
 
-// TODO: it_rejects_invalid_auction_cancellations
+#[test]
+fn it_rejects_invalid_auction_cancels() {
+    let TestSetup {
+        mut test,
+        marketplace_component,
+        account_nft_component,
+        seller,
+        seller_nft_address,
+        ..
+    } = setup();
+
+    // create an auction for the NFT
+    let auction_period = 10;
+    let auction = AuctionRequest {
+        marketplace: marketplace_component,
+        seller: seller.clone(),
+        nft: seller_nft_address.clone(),
+        min_price: None,
+        buy_price: None,
+        epoch_period: auction_period,
+    };
+    let badge = create_auction(&mut test, &auction);
+
+    // the badge has not been emmited by the marketplace
+    let other_nft = mint_account_nft(&mut test, &seller, &account_nft_component);
+    let reason = test.execute_expect_failure(
+        Transaction::builder()
+            .call_method(seller.component, "withdraw_non_fungible", args![
+                other_nft.resource_address(),
+                other_nft.id()
+            ])
+            .put_last_instruction_output_on_workspace("invalid_badge")
+            .call_method(marketplace_component, "cancel_auction", args![Workspace("invalid_badge")])
+            .sign(&seller.key)
+            .build(),
+        vec![seller.owner_token.clone()],
+    );
+    assert_reject_reason(reason, "Invalid seller badge resource");
+
+    // reject the cancel if the auction has ended
+    set_epoch(&mut test, auction_period + 1);
+    let reason = test.execute_expect_failure(
+        Transaction::builder()
+            .call_method(seller.component, "withdraw_non_fungible", args![
+                badge.resource_address(),
+                badge.id()
+            ])
+            .put_last_instruction_output_on_workspace("badge")
+            .call_method(marketplace_component, "cancel_auction", args![Workspace("badge")])
+            .sign(&seller.key)
+            .build(),
+        vec![seller.owner_token.clone()],
+    );
+    assert_reject_reason(reason, "Auction has ended");
+}
 
 #[derive(Clone, Debug)]
 struct Account {
@@ -486,7 +534,6 @@ struct TestSetup {
     account_nft_component: ComponentAddress,
     marketplace_component: ComponentAddress,
     seller: Account,
-    seller_badge_resource: ResourceAddress,
     seller_nft_address: NonFungibleAddress,
 }
 
@@ -513,14 +560,6 @@ fn setup() -> TestSetup {
     let marketplace_component = result.finalize.execution_results[0]
         .decode::<ComponentAddress>()
         .unwrap();
-    let indexed = test
-        .read_only_state_store()
-        .inspect_component(marketplace_component)
-        .unwrap();
-    let seller_badge_resource = indexed
-        .get_value("$.seller_badge_resource")
-        .unwrap()
-        .expect("seller_badge_resource not found");
 
     // create a new account NFT that the seller is going to put on sale
     let account_nft_component = create_account_nft_component(&mut test, &seller);
@@ -531,7 +570,6 @@ fn setup() -> TestSetup {
         marketplace_component,
         account_nft_component,
         seller,
-        seller_badge_resource,
         seller_nft_address,
     }
 }
@@ -666,7 +704,6 @@ fn finish_auction(test: &mut TemplateTest, req: &FinishRequest) {
 struct CancelRequest {
     marketplace: ComponentAddress,
     account: Account,
-    nft: NonFungibleAddress,
     seller_badge: NonFungibleAddress,
 }
 

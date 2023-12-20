@@ -307,7 +307,7 @@ mod nft_marketplace {
                 seller_account.call::<_,()>("deposit".to_string(), args![nft_bucket]);
             }
 
-            // TODO: burn the seller badge to avoid it being used again
+            // TODO: burn the seller badge to avoid it being used again (should we recall it first?)
 
             // TODO: we cannot remove the auction because the network does not allow to delete the auction vault (OrphanedSubstate)
             // self.auctions.remove(&nft_address);
