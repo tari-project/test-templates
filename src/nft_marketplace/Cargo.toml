@@ -10,13 +10,10 @@ tari_template_lib = { path = "../../../tari-dan/dan_layer/template_lib" }
 serde = { version = "1.0", default-features = false, features = ["derive"] }
 
 [dev-dependencies]
-# tari_template_test_tooling = { git = "https://github.com/tari-project/tari-dan.git", branch = "development" }
-# tari_transaction = { git = "https://github.com/tari-project/tari-dan.git", branch = "development" }
-# tari_bor = { git = "https://github.com/tari-project/tari-dan.git", branch = "development" }
-tari_template_test_tooling = { path = "../../../tari-dan/dan_layer/template_test_tooling" }
-tari_transaction = { path = "../../../tari-dan/dan_layer/transaction" }
-tari_bor = { path = "../../../tari-dan/dan_layer/tari_bor" }
-tari_engine_types = { path = "../../../tari-dan/dan_layer/engine_types" }
+tari_template_test_tooling = { git = "https://github.com/tari-project/tari-dan.git", branch = "development" }
+tari_transaction = { git = "https://github.com/tari-project/tari-dan.git", branch = "development" }
+tari_bor = { git = "https://github.com/tari-project/tari-dan.git", branch = "development" }
+tari_engine_types = { git = "https://github.com/tari-project/tari-dan.git", branch = "development" }
 
 [profile.release]
 opt-level = 's'     # Optimize for size.
