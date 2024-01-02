@@ -88,21 +88,20 @@ mod nft_marketplace {
 
     impl NftMarketplace {
         pub fn new() -> Component<NftMarketplace> {
-            let component_access_rules = AccessRules::new()
-                .default(AccessRule::AllowAll);
+            let component_access_rules = AccessRules::new().default(AccessRule::AllowAll);
             let auctions = BTreeMap::new();
             let seller_badge_resource = ResourceBuilder::non_fungible()
-                    // TODO: proper access control. Is it possible to allow only this component to mint&burn? 
-                    .mintable(AccessRule::AllowAll)
-                    .burnable(AccessRule::AllowAll)
-                    .build();
+                // TODO: proper access control. Is it possible to allow only this component to mint&burn?
+                .mintable(AccessRule::AllowAll)
+                .burnable(AccessRule::AllowAll)
+                .build();
 
             Component::new(Self {
                 auctions,
-                seller_badge_resource
+                seller_badge_resource,
             })
-                .with_access_rules(component_access_rules)
-                .create()
+            .with_access_rules(component_access_rules)
+            .create()
         }
 
         pub fn get_auction(&self, nft_address: NonFungibleAddress) -> Option<Auction> {
@@ -113,7 +112,7 @@ mod nft_marketplace {
         // TODO: support for advanced filtering (price ranges, auctions about to end, etc.) could be desirable
         pub fn get_auctions(&self) -> BTreeMap<NonFungibleAddress, Auction> {
             self.auctions.clone()
-        }  
+        }
 
         // returns a badge used to cancel the sell order in the future
         // the badge will contain immutable metadata referencing the nft being sold
@@ -162,15 +161,29 @@ mod nft_marketplace {
             let mut immutable_data = Metadata::new();
             immutable_data.insert(SELLER_BADGE_RESOURCE_FIELD, nft_resource.to_string());
             immutable_data.insert(SELLER_BADGE_ID_FIELD, nft_id.to_canonical_string());
-            ResourceManager::get(self.seller_badge_resource)
-                .mint_non_fungible(badge_id, &immutable_data, &())
+            ResourceManager::get(self.seller_badge_resource).mint_non_fungible(
+                badge_id,
+                &immutable_data,
+                &(),
+            )
         }
 
         // process a new bid for an ongoing auction
-        pub fn bid(&mut self, bidder_account_address: ComponentAddress, nft_address: NonFungibleAddress, payment: Bucket) {
-            let auction = self.auctions.get_mut(&nft_address).expect("Auction does not exist");
+        pub fn bid(
+            &mut self,
+            bidder_account_address: ComponentAddress,
+            nft_address: NonFungibleAddress,
+            payment: Bucket,
+        ) {
+            let auction = self
+                .auctions
+                .get_mut(&nft_address)
+                .expect("Auction does not exist");
 
-            assert!(Consensus::current_epoch() < auction.ending_epoch, "Auction has expired");
+            assert!(
+                Consensus::current_epoch() < auction.ending_epoch,
+                "Auction has expired"
+            );
 
             assert_eq!(
                 payment.resource_address(),
@@ -180,7 +193,7 @@ mod nft_marketplace {
 
             // validate that the bidder account is really an account
             // so we can deposit the refund later if a higher bidder comes
-            // otherwise an attacker could block newer higher bids 
+            // otherwise an attacker could block newer higher bids
             Self::assert_component_is_account(bidder_account_address);
 
             // check that the minimum price (if set) is met
@@ -198,7 +211,7 @@ mod nft_marketplace {
                 let previous_bidder_account = ComponentManager::get(highest_bid.bidder_account);
                 let refund_bucket = highest_bid.vault.withdraw_all();
                 // TODO: improve call method generics when there is no return value
-                previous_bidder_account.call::<_,()>("deposit".to_string(), args![refund_bucket]);
+                previous_bidder_account.call::<_, ()>("deposit".to_string(), args![refund_bucket]);
 
                 // update the highest bidder in the auction
                 highest_bid.bidder_account = bidder_account_address;
@@ -213,8 +226,11 @@ mod nft_marketplace {
             }
 
             // if the bid meets the buying price, we process the sell immediatly
-            if let Some(buy_price) = auction.buy_price {     
-                assert!(payment_amount <= buy_price, "Payment exceeds the buying price");
+            if let Some(buy_price) = auction.buy_price {
+                assert!(
+                    payment_amount <= buy_price,
+                    "Payment exceeds the buying price"
+                );
                 if payment_amount == buy_price {
                     self.process_auction_payments(nft_address);
                 }
@@ -224,7 +240,10 @@ mod nft_marketplace {
         // finish the auction by sending the NFT and payment to the respective accounts
         // used by a bid seller to receive the bid payment, or by the buyer to get the NFT, whatever happens first
         pub fn finish_auction(&mut self, nft_address: NonFungibleAddress) {
-            let auction = self.auctions.get_mut(&nft_address).expect("Auction does not exist");
+            let auction = self
+                .auctions
+                .get_mut(&nft_address)
+                .expect("Auction does not exist");
 
             assert!(
                 Consensus::current_epoch() >= auction.ending_epoch,
@@ -245,30 +264,38 @@ mod nft_marketplace {
             // the seller badge references the corresponding nft address in its immutable data
             // TODO: we need a more convenient method in the template_lib to extract NFT data from a bucket
             let seller_badge_id = &seller_badge_bucket.get_non_fungible_ids()[0];
-            let seller_badge = ResourceManager::get(self.seller_badge_resource).get_non_fungible(&seller_badge_id);
+            let seller_badge =
+                ResourceManager::get(self.seller_badge_resource).get_non_fungible(&seller_badge_id);
             let nft_metadata = seller_badge.get_data::<Metadata>();
-            let nft_resource_str = nft_metadata.get(SELLER_BADGE_RESOURCE_FIELD)
+            let nft_resource_str = nft_metadata
+                .get(SELLER_BADGE_RESOURCE_FIELD)
                 .expect("Invalid seller badge: No NFT resource field in metadata");
             let nft_resource = ResourceAddress::from_str(&nft_resource_str)
                 .expect("Invalid seller badge: Invalid NFT resource field in metadata");
-            let nft_id_str = nft_metadata.get(SELLER_BADGE_ID_FIELD)
+            let nft_id_str = nft_metadata
+                .get(SELLER_BADGE_ID_FIELD)
                 .expect("Invalid seller badge: No NFT id field in metadata");
             let nft_id = NonFungibleId::try_from_canonical_string(nft_id_str)
                 .expect("Invalid seller badge: Invalid NFT id field in metadata");
             let nft_address = NonFungibleAddress::new(nft_resource, nft_id);
-            let auction = self.auctions.get_mut(&nft_address)
+            let auction = self
+                .auctions
+                .get_mut(&nft_address)
                 .expect("Auction does not exist");
 
             // an auction cannot be cancelled if it has ended
-            assert!(Consensus::current_epoch() < auction.ending_epoch, "Auction has ended");
+            assert!(
+                Consensus::current_epoch() < auction.ending_epoch,
+                "Auction has ended"
+            );
 
             // we are canceling the bid
             // so we need to pay back the highest bidded (if there's one)
             if let Some(highest_bid) = &mut auction.highest_bid {
                 let bidder_account = ComponentManager::get(highest_bid.bidder_account);
                 let refund_bucket = highest_bid.vault.withdraw_all();
-                bidder_account.call::<_,()>("deposit".to_string(), args![refund_bucket]);
-                // TODO: removing the bid ends up in a OrphanedSubstate error in the 
+                bidder_account.call::<_, ()>("deposit".to_string(), args![refund_bucket]);
+                // TODO: removing the bid ends up in a OrphanedSubstate error in the
                 //       but we need to mark that the auction is finished somehow to prevent new bids
                 // auction.highest_bid = None;
             }
@@ -279,17 +306,23 @@ mod nft_marketplace {
             // send the NFT back to the seller
             let seller_account = ComponentManager::get(auction.seller_address);
             let nft_bucket = auction.vault.withdraw_all();
-            seller_account.call::<_,()>("deposit".to_string(), args![nft_bucket]);
+            seller_account.call::<_, ()>("deposit".to_string(), args![nft_bucket]);
         }
 
         fn assert_component_is_account(component_address: ComponentAddress) {
             let component = ComponentManager::get(component_address);
-            assert!(component.get_template_address() == ACCOUNT_TEMPLATE_ADDRESS, "Invalid bidder account");
+            assert!(
+                component.get_template_address() == ACCOUNT_TEMPLATE_ADDRESS,
+                "Invalid bidder account"
+            );
         }
 
         // this method MUST ALWAYS be private, to prevent auction cancellation by unauthorized third parties
         fn process_auction_payments(&mut self, nft_address: NonFungibleAddress) {
-            let auction = self.auctions.get_mut(&nft_address).expect("Auction does not exist");
+            let auction = self
+                .auctions
+                .get_mut(&nft_address)
+                .expect("Auction does not exist");
 
             let seller_account = ComponentManager::get(auction.seller_address);
             let nft_bucket = auction.vault.withdraw_all();
@@ -297,14 +330,14 @@ mod nft_marketplace {
             if let Some(highest_bid) = &mut auction.highest_bid {
                 // deposit the nft to the bidder
                 let bidder_account = ComponentManager::get(highest_bid.bidder_account);
-                bidder_account.call::<_,()>("deposit".to_string(), args![nft_bucket]);
+                bidder_account.call::<_, ()>("deposit".to_string(), args![nft_bucket]);
 
                 // deposit the funds to the seller
                 let payment = highest_bid.vault.withdraw_all();
-                seller_account.call::<_,()>("deposit".to_string(), args![payment]);
+                seller_account.call::<_, ()>("deposit".to_string(), args![payment]);
             } else {
                 // no bidders in the auction, so just return the NFT to the seller
-                seller_account.call::<_,()>("deposit".to_string(), args![nft_bucket]);
+                seller_account.call::<_, ()>("deposit".to_string(), args![nft_bucket]);
             }
 
             // TODO: burn the seller badge to avoid it being used again (should we recall it first?)
