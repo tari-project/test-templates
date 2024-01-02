@@ -24,18 +24,9 @@ use tari_template_lib::prelude::*;
 use tari_template_lib::Hash;
 
 use std::collections::BTreeMap;
-use std::str::FromStr;
 
 /// TODO: create constant in template_lib for account template address (and other builtin templates)
 pub const ACCOUNT_TEMPLATE_ADDRESS: Hash = Hash::from_array([0u8; 32]);
-
-// the immutable field name on the seller badges used to reference which nft is being sold
-// used to allow the seller the option to cancel
-// TODO: there should be only one metadata field needed (for the whole NonFungibleAddress)
-//       but there is no easy way to parse back the whole address string into a NonFungibleAddress
-//       so here we workaround by storing the resource and the id separately
-pub const SELLER_BADGE_RESOURCE_FIELD: &str = "resource";
-pub const SELLER_BADGE_ID_FIELD: &str = "id";
 
 /// Simple English-like auctions
 /// The winner needs to claim the nft after the bidding period finishes. For simplicity, no marketplace fees are
@@ -158,9 +149,7 @@ mod nft_marketplace {
             // mint and return a badge to be used later for (optionally) canceling the auction by the seller
             let badge_id = NonFungibleId::random();
             // the data MUST be immutable, to avoid security exploits (changing the nft which it points to afterwards)
-            let mut immutable_data = Metadata::new();
-            immutable_data.insert(SELLER_BADGE_RESOURCE_FIELD, nft_resource.to_string());
-            immutable_data.insert(SELLER_BADGE_ID_FIELD, nft_id.to_canonical_string());
+            let immutable_data = nft_address;
             ResourceManager::get(self.seller_badge_resource).mint_non_fungible(
                 badge_id,
                 &immutable_data,
@@ -266,18 +255,7 @@ mod nft_marketplace {
             let seller_badge_id = &seller_badge_bucket.get_non_fungible_ids()[0];
             let seller_badge =
                 ResourceManager::get(self.seller_badge_resource).get_non_fungible(&seller_badge_id);
-            let nft_metadata = seller_badge.get_data::<Metadata>();
-            let nft_resource_str = nft_metadata
-                .get(SELLER_BADGE_RESOURCE_FIELD)
-                .expect("Invalid seller badge: No NFT resource field in metadata");
-            let nft_resource = ResourceAddress::from_str(&nft_resource_str)
-                .expect("Invalid seller badge: Invalid NFT resource field in metadata");
-            let nft_id_str = nft_metadata
-                .get(SELLER_BADGE_ID_FIELD)
-                .expect("Invalid seller badge: No NFT id field in metadata");
-            let nft_id = NonFungibleId::try_from_canonical_string(nft_id_str)
-                .expect("Invalid seller badge: Invalid NFT id field in metadata");
-            let nft_address = NonFungibleAddress::new(nft_resource, nft_id);
+            let nft_address = seller_badge.get_data::<NonFungibleAddress>();
             let auction = self
                 .auctions
                 .get_mut(&nft_address)
