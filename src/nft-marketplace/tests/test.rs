@@ -638,7 +638,7 @@ struct TestSetup {
 }
 
 fn setup() -> TestSetup {
-    let mut test = TemplateTest::new(["./"]);
+    let mut test = TemplateTest::new(["./templates/auction"]);
 
     // create the seller account
     let (seller_account, seller_owner_token, seller_key) = test.create_owned_account();
