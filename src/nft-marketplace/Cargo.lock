@@ -2461,6 +2461,7 @@ dependencies = [
 [[package]]
 name = "tari_bor"
 version = "0.3.0"
+source = "git+https://github.com/tari-project/tari-dan.git?branch=development#516c5d177b4d3404683f2b27993ab91198535b46"
 dependencies = [
  "ciborium",
  "ciborium-io",
@@ -2563,6 +2564,7 @@ dependencies = [
 [[package]]
 name = "tari_dan_common_types"
 version = "0.3.0"
+source = "git+https://github.com/tari-project/tari-dan.git?branch=development#516c5d177b4d3404683f2b27993ab91198535b46"
 dependencies = [
  "blake2",
  "libp2p-identity",
@@ -2583,6 +2585,7 @@ dependencies = [
 [[package]]
 name = "tari_dan_engine"
 version = "0.3.0"
+source = "git+https://github.com/tari-project/tari-dan.git?branch=development#516c5d177b4d3404683f2b27993ab91198535b46"
 dependencies = [
  "anyhow",
  "blake2",
@@ -2611,6 +2614,7 @@ dependencies = [
 [[package]]
 name = "tari_engine_types"
 version = "0.3.0"
+source = "git+https://github.com/tari-project/tari-dan.git?branch=development#516c5d177b4d3404683f2b27993ab91198535b46"
 dependencies = [
  "base64 0.21.5",
  "blake2",
@@ -2653,6 +2657,7 @@ dependencies = [
 [[package]]
 name = "tari_template_abi"
 version = "0.3.0"
+source = "git+https://github.com/tari-project/tari-dan.git?branch=development#516c5d177b4d3404683f2b27993ab91198535b46"
 dependencies = [
  "serde",
  "tari_bor",
@@ -2661,6 +2666,7 @@ dependencies = [
 [[package]]
 name = "tari_template_builtin"
 version = "0.3.0"
+source = "git+https://github.com/tari-project/tari-dan.git?branch=development#516c5d177b4d3404683f2b27993ab91198535b46"
 dependencies = [
  "lazy_static",
  "tari_engine_types",
@@ -2669,6 +2675,7 @@ dependencies = [
 [[package]]
 name = "tari_template_lib"
 version = "0.3.0"
+source = "git+https://github.com/tari-project/tari-dan.git?branch=development#516c5d177b4d3404683f2b27993ab91198535b46"
 dependencies = [
  "newtype-ops",
  "serde",
@@ -2681,6 +2688,7 @@ dependencies = [
 [[package]]
 name = "tari_template_macros"
 version = "0.3.0"
+source = "git+https://github.com/tari-project/tari-dan.git?branch=development#516c5d177b4d3404683f2b27993ab91198535b46"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2692,6 +2700,7 @@ dependencies = [
 [[package]]
 name = "tari_template_test_tooling"
 version = "0.3.0"
+source = "git+https://github.com/tari-project/tari-dan.git?branch=development#516c5d177b4d3404683f2b27993ab91198535b46"
 dependencies = [
  "anyhow",
  "rand",
@@ -2711,6 +2720,7 @@ dependencies = [
 [[package]]
 name = "tari_transaction"
 version = "0.3.0"
+source = "git+https://github.com/tari-project/tari-dan.git?branch=development#516c5d177b4d3404683f2b27993ab91198535b46"
 dependencies = [
  "rand",
  "serde",
@@ -2725,6 +2735,7 @@ dependencies = [
 [[package]]
 name = "tari_transaction_manifest"
 version = "0.3.0"
+source = "git+https://github.com/tari-project/tari-dan.git?branch=development#516c5d177b4d3404683f2b27993ab91198535b46"
 dependencies = [
  "proc-macro2",
  "syn 1.0.109",
