@@ -1,4 +1,4 @@
-//   Copyright 2023. The Tari Project
+//   Copyright 2024. The Tari Project
 //
 //   Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
 //   following conditions are met:
@@ -23,44 +23,8 @@
 use tari_template_lib::prelude::*;
 use tari_template_lib::Hash;
 
-use std::collections::BTreeMap;
-
 /// TODO: create constant in template_lib for account template address (and other builtin templates)
 pub const ACCOUNT_TEMPLATE_ADDRESS: Hash = Hash::from_array([0u8; 32]);
-
-/// Simple English-like auctions
-/// The winner needs to claim the nft after the bidding period finishes. For simplicity, no marketplace fees are
-/// considered. There exist a lot more approaches to auctions, we can highlight:
-///     - Price descending, dutch-like auctions. The first bidder gets the nft right away, no need to wait or claim
-///       afterwards
-///     - Blind auctions, were bids are not known until the end. This requires cryptography support, and implies that
-///       all bidder's funds will be locked until the end of the auction
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct Auction {
-    // The NFT will be locked, so the user gives away control to the marketplace
-    // There are other approaches to this, like just allowing the seller to complete and confirm the bid at the end
-    vault: Vault,
-
-    // address of the account component of the seller
-    seller_address: ComponentAddress,
-
-    // minimum required price for a bid
-    min_price: Option<Amount>,
-
-    // price at which the NFT will be sold automatically
-    buy_price: Option<Amount>,
-
-    // Holds the current highest bidder, it's replaced when a new highest bidder appears
-    highest_bid: Option<Bid>,
-
-    // Time sensitive logic is a big issue, we need custom support for it. I see two options:
-    //      1. Ad hoc protocol in the second layer to agree on timestamps (inside of a commitee? globally?)
-    //      2. Leverage the base layer block number (~3 minute intervals)
-    //      3. Use the current epoch (~30 min intervals)
-    // We are going with (3) here. But either way this means custom utils and that some external state influences
-    // execution
-    ending_epoch: u64,
-}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Bid {
@@ -72,49 +36,51 @@ pub struct Bid {
 mod nft_marketplace {
     use super::*;
 
-    pub struct NftMarketplace {
-        auctions: BTreeMap<NonFungibleAddress, Auction>,
+    /// Simple English-like auctions
+    /// The winner needs to claim the nft after the bidding period finishes. For simplicity, no marketplace fees are
+    /// considered. There exist a lot more approaches to auctions, we can highlight:
+    ///     - Price descending, dutch-like auctions. The first bidder gets the nft right away, no need to wait or claim
+    ///       afterwards
+    ///     - Blind auctions, were bids are not known until the end. This requires cryptography support, and implies that
+    ///       all bidder's funds will be locked until the end of the auction
+    pub struct Auction {
         seller_badge_resource: ResourceAddress,
+
+        // The NFT will be locked, so the user gives away control to the marketplace
+        // There are other approaches to this, like just allowing the seller to complete and confirm the bid at the end
+        vault: Vault,
+
+        // address of the account component of the seller
+        seller_address: ComponentAddress,
+
+        // minimum required price for a bid
+        min_price: Option<Amount>,
+
+        // price at which the NFT will be sold automatically
+        buy_price: Option<Amount>,
+
+        // Holds the current highest bidder, it's replaced when a new highest bidder appears
+        highest_bid: Option<Bid>,
+
+        // Time sensitive logic is a big issue, we need custom support for it. I see two options:
+        //      1. Ad hoc protocol in the second layer to agree on timestamps (inside of a commitee? globally?)
+        //      2. Leverage the base layer block number (~3 minute intervals)
+        //      3. Use the current epoch (~30 min intervals)
+        // We are going with (3) here. But either way this means custom utils and that some external state influences
+        // execution
+        ending_epoch: u64,
     }
 
-    impl NftMarketplace {
-        pub fn new() -> Component<NftMarketplace> {
-            let component_access_rules = AccessRules::new().default(AccessRule::AllowAll);
-            let auctions = BTreeMap::new();
-            let seller_badge_resource = ResourceBuilder::non_fungible()
-                // TODO: proper access control. Is it possible to allow only this component to mint&burn?
-                .mintable(AccessRule::AllowAll)
-                .burnable(AccessRule::AllowAll)
-                .build();
-
-            Component::new(Self {
-                auctions,
-                seller_badge_resource,
-            })
-            .with_access_rules(component_access_rules)
-            .create()
-        }
-
-        pub fn get_auction(&self, nft_address: NonFungibleAddress) -> Option<Auction> {
-            self.auctions.get(&nft_address).cloned()
-        }
-
-        // convenience method for external APIs and interfaces
-        // TODO: support for advanced filtering (price ranges, auctions about to end, etc.) could be desirable
-        pub fn get_auctions(&self) -> BTreeMap<NonFungibleAddress, Auction> {
-            self.auctions.clone()
-        }
-
+    impl Auction {
         // returns a badge used to cancel the sell order in the future
         // the badge will contain immutable metadata referencing the nft being sold
-        pub fn start_auction(
-            &mut self,
+        pub fn new(
             nft_bucket: Bucket,
             seller_address: ComponentAddress,
             min_price: Option<Amount>,
             buy_price: Option<Amount>,
             epoch_period: u64,
-        ) -> Bucket {
+        ) -> (Component<Auction>, Bucket) {
             assert!(
                 nft_bucket.resource_type() == ResourceType::NonFungible,
                 "The resource is not a NFT"
@@ -127,50 +93,42 @@ mod nft_marketplace {
 
             assert!(epoch_period > 0, "Invalid auction period");
 
-            // needed to ensure that we can process the auction when it ends
+            // needed to ensure that we can process the auction payments when it ends
             Self::assert_component_is_account(seller_address);
 
-            let auction = Auction {
+            // create the bucket with the badge to allow the seller to cancel the auction at any time
+            // we make sure that only the initial badge will be minted
+            let seller_badge_bucket = ResourceBuilder::non_fungible()
+                .with_non_fungible(NonFungibleId::random(), &(), &())
+                .mintable(AccessRule::DenyAll)
+                .burnable(AccessRule::AllowAll)
+                .build_bucket();
+            let seller_badge_resource = seller_badge_bucket.resource_address();
+
+            // initialize the auction component
+            let component = Component::new(Self {
                 vault: Vault::from_bucket(nft_bucket),
                 seller_address,
                 min_price,
                 buy_price,
                 highest_bid: None,
                 ending_epoch: Consensus::current_epoch() + epoch_period,
-            };
+                seller_badge_resource,
+            })
+            .with_access_rules(AccessRules::allow_all())
+            .create();
 
-            // TODO: we need a "get_non_fungible_address" method in the template_lib
-            let nft_resource = auction.vault.resource_address();
-            let nft_id = &auction.vault.get_non_fungible_ids()[0];
-            let nft_address = NonFungibleAddress::new(nft_resource, nft_id.clone());
-
-            self.auctions.insert(nft_address.clone(), auction);
-
-            // mint and return a badge to be used later for (optionally) canceling the auction by the seller
-            let badge_id = NonFungibleId::random();
-            // the data MUST be immutable, to avoid security exploits (changing the nft which it points to afterwards)
-            let immutable_data = nft_address;
-            ResourceManager::get(self.seller_badge_resource).mint_non_fungible(
-                badge_id,
-                &immutable_data,
-                &(),
-            )
+            (component, seller_badge_bucket)
         }
 
         // process a new bid for an ongoing auction
         pub fn bid(
             &mut self,
             bidder_account_address: ComponentAddress,
-            nft_address: NonFungibleAddress,
             payment: Bucket,
         ) {
-            let auction = self
-                .auctions
-                .get_mut(&nft_address)
-                .expect("Auction does not exist");
-
             assert!(
-                Consensus::current_epoch() < auction.ending_epoch,
+                Consensus::current_epoch() < self.ending_epoch,
                 "Auction has expired"
             );
 
@@ -187,12 +145,12 @@ mod nft_marketplace {
 
             // check that the minimum price (if set) is met
             let payment_amount = payment.amount();
-            if let Some(min_price) = auction.min_price {
+            if let Some(min_price) = self.min_price {
                 assert!(payment_amount >= min_price, "Minimum price not met");
             }
 
             // immediatly refund the previous highest bidder if there is one
-            if let Some(highest_bid) = &mut auction.highest_bid {
+            if let Some(highest_bid) = &mut self.highest_bid {
                 assert!(
                     payment_amount > highest_bid.vault.balance(),
                     "There is a higher bid placed"
@@ -211,79 +169,64 @@ mod nft_marketplace {
                     bidder_account: bidder_account_address,
                     vault: Vault::from_bucket(payment.clone()),
                 };
-                auction.highest_bid = Some(highest_bid);
+                self.highest_bid = Some(highest_bid);
             }
 
             // if the bid meets the buying price, we process the sell immediatly
-            if let Some(buy_price) = auction.buy_price {
+            if let Some(buy_price) = self.buy_price {
                 assert!(
                     payment_amount <= buy_price,
                     "Payment exceeds the buying price"
                 );
                 if payment_amount == buy_price {
-                    self.process_auction_payments(nft_address);
+                    self.process_payments();
                 }
             }
         }
 
         // finish the auction by sending the NFT and payment to the respective accounts
         // used by a bid seller to receive the bid payment, or by the buyer to get the NFT, whatever happens first
-        pub fn finish_auction(&mut self, nft_address: NonFungibleAddress) {
-            let auction = self
-                .auctions
-                .get_mut(&nft_address)
-                .expect("Auction does not exist");
-
+        pub fn finish(&mut self) {
             assert!(
-                Consensus::current_epoch() >= auction.ending_epoch,
+                Consensus::current_epoch() >= self.ending_epoch,
                 "Auction is still in progress"
             );
 
-            self.process_auction_payments(nft_address);
+            self.process_payments();
         }
 
         // the seller wants to cancel the auction
-        pub fn cancel_auction(&mut self, seller_badge_bucket: Bucket) {
-            // we check that the badge has been created by the marketplace
+        pub fn cancel(&mut self, seller_badge_bucket: Bucket) {
+            // as the seller badge resource cannot be minted and only one token exist,
+            // we only need to check that the resource address matches
             assert!(
                 seller_badge_bucket.resource_address() == self.seller_badge_resource,
-                "Invalid seller badge resource"
+                "Invalid seller badge"
             );
-
-            // the seller badge references the corresponding nft address in its immutable data
-            // TODO: we need a more convenient method in the template_lib to extract NFT data from a bucket
-            let seller_badge_id = &seller_badge_bucket.get_non_fungible_ids()[0];
-            let seller_badge =
-                ResourceManager::get(self.seller_badge_resource).get_non_fungible(&seller_badge_id);
-            let nft_address = seller_badge.get_data::<NonFungibleAddress>();
-            let auction = self
-                .auctions
-                .get_mut(&nft_address)
-                .expect("Auction does not exist");
 
             // an auction cannot be cancelled if it has ended
             assert!(
-                Consensus::current_epoch() < auction.ending_epoch,
+                Consensus::current_epoch() < self.ending_epoch,
                 "Auction has ended"
             );
 
             // we are canceling the bid
             // so we need to pay back the highest bidded (if there's one)
-            if let Some(highest_bid) = &mut auction.highest_bid {
+            if let Some(highest_bid) = &mut self.highest_bid {
                 let bidder_account = ComponentManager::get(highest_bid.bidder_account);
                 let refund_bucket = highest_bid.vault.withdraw_all();
                 bidder_account.call::<_, ()>("deposit".to_string(), args![refund_bucket]);
                 // TODO: removing the bid ends up in a OrphanedSubstate error in the
                 //       but we need to mark that the auction is finished somehow to prevent new bids
-                // auction.highest_bid = None;
+                // self.highest_bid = None;
             }
 
-            // burn the seller token
+            // burn the seller token to prevent it from being used again, as it has no more purpose
             seller_badge_bucket.burn();
 
             // send the NFT back to the seller
-            let seller_account = ComponentManager::get(auction.seller_address);
-            let nft_bucket = auction.vault.withdraw_all();
+            let seller_account = ComponentManager::get(self.seller_address);
+            let nft_bucket = self.vault.withdraw_all();
             seller_account.call::<_, ()>("deposit".to_string(), args![nft_bucket]);
         }
 
@@ -296,16 +239,11 @@ mod nft_marketplace {
         }
 
         // this method MUST ALWAYS be private, to prevent auction cancellation by unauthorized third parties
-        fn process_auction_payments(&mut self, nft_address: NonFungibleAddress) {
-            let auction = self
-                .auctions
-                .get_mut(&nft_address)
-                .expect("Auction does not exist");
+        fn process_payments(&mut self) {
+            let seller_account = ComponentManager::get(self.seller_address);
+            let nft_bucket = self.vault.withdraw_all();
 
-            let seller_account = ComponentManager::get(auction.seller_address);
-            let nft_bucket = auction.vault.withdraw_all();
-
-            if let Some(highest_bid) = &mut auction.highest_bid {
+            if let Some(highest_bid) = &mut self.highest_bid {
                 // deposit the nft to the bidder
                 let bidder_account = ComponentManager::get(highest_bid.bidder_account);
                 bidder_account.call::<_, ()>("deposit".to_string(), args![nft_bucket]);
@@ -319,9 +257,6 @@ mod nft_marketplace {
             }
 
             // TODO: burn the seller badge to avoid it being used again (should we recall it first?)
-
-            // TODO: we cannot remove the auction because the network does not allow to delete the auction vault (OrphanedSubstate)
-            // self.auctions.remove(&nft_address);
         }
     }
 }
