@@ -43,13 +43,13 @@ mod faucet_template {
         }
 
         pub fn take_free_coins(&mut self) -> Bucket {
-            debug("Withdrawing 1000 coins from faucet");
+            debug!("Withdrawing 1000 coins from faucet");
             self.vault.withdraw(Amount(1000))
         }
 
         // TODO: we can make a fungible utility template with these common operations
         pub fn burn_coins(&mut self, amount: Amount) {
-            let mut bucket = self.vault.withdraw(amount);
+            let bucket = self.vault.withdraw(amount);
             bucket.burn();
         }
 
