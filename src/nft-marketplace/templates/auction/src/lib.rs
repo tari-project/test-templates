@@ -80,7 +80,7 @@ mod nft_marketplace {
             min_price: Option<Amount>,
             buy_price: Option<Amount>,
             epoch_period: u64,
-        ) -> (Component<Auction>, Bucket) {
+        ) -> Bucket {
             assert!(
                 nft_bucket.resource_type() == ResourceType::NonFungible,
                 "The resource is not a NFT"
@@ -118,15 +118,11 @@ mod nft_marketplace {
             .with_access_rules(AccessRules::allow_all())
             .create();
 
-            (component, seller_badge_bucket)
+            seller_badge_bucket
         }
 
         // process a new bid for an ongoing auction
-        pub fn bid(
-            &mut self,
-            bidder_account_address: ComponentAddress,
-            payment: Bucket,
-        ) {
+        pub fn bid(&mut self, bidder_account_address: ComponentAddress, payment: Bucket) {
             assert!(
                 Consensus::current_epoch() < self.ending_epoch,
                 "Auction has expired"
