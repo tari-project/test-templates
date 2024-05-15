@@ -8,6 +8,9 @@ use tari_template_lib::{
     prelude::{NonFungibleAddress, ResourceAddress},
 };
 use tari_template_test_tooling::{SubstateType, TemplateTest};
+use tari_template_test_tooling::support::assert_error::assert_reject_reason;
+use tari_transaction::Transaction;
+use tari_template_test_tooling::crypto::RistrettoSecretKey;
 
 struct TariswapTest {
     template_test: TemplateTest,
@@ -378,4 +381,55 @@ fn it_swaps_fungible_tokens() {
     let expected_a_amount = 50;
     let expected_b_amount = 51;
     assert_remove_liquidity(&mut test, lp_amount_to_remove, expected_a_amount, expected_b_amount);
+}
+
+#[test]
+fn it_detects_existing_pools() {
+    // init the test
+    let fee = 50; // 5% market fee
+    let mut test = setup(fee);
+
+    // copy values to keep the borrow checker happy
+    let a_resource = test.a_resource;
+    let b_resource = test.b_resource;
+
+    // try creating a pool that was already created in the test setup
+    assert_duplicated_pool_error(&mut test, a_resource, b_resource);
+
+    // a pool is bidirectional, so it should also fail when we switch the pool resource order
+    assert_duplicated_pool_error(&mut test, b_resource, a_resource);
+
+    // new pools for different pairs should be able to be created without problems
+    let (_, c_resource) = create_faucet_component(&mut test.template_test, "C".to_string());
+    let c_transaction = new_pool_transaction(&mut test, a_resource, c_resource);
+    test.template_test.execute_expect_success(c_transaction, vec![]);
+}
+
+fn assert_duplicated_pool_error(
+    test: &mut TariswapTest,
+    a_resource: ResourceAddress,
+    b_resource: ResourceAddress
+) {
+    let transaction = new_pool_transaction(test, a_resource, b_resource);
+    let reason = test.template_test.execute_expect_failure(
+        transaction,
+        vec![],
+    );
+    assert_reject_reason(reason, "A pool already exists for the input resources");
+}
+
+fn new_pool_transaction(
+    test: &mut TariswapTest,
+    a_resource: ResourceAddress,
+    b_resource: ResourceAddress
+) -> Transaction {
+    Transaction::builder()
+        .call_method(
+            test.index_component,
+            "create_pool",
+            args![a_resource, b_resource],
+        )
+        // there are no user-protected methods in the tariswap
+        .sign(&RistrettoSecretKey::default())
+        .build()
 }
