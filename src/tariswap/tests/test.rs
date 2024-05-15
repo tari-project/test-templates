@@ -14,7 +14,8 @@ struct TariswapTest {
     a_resource: ResourceAddress,
     b_resource: ResourceAddress,
     lp_resource: ResourceAddress,
-    tariswap: ComponentAddress,
+    index_component: ComponentAddress,
+    pool_component: ComponentAddress,
     account_address: ComponentAddress,
     account_proof: NonFungibleAddress,
 }
@@ -22,11 +23,14 @@ struct TariswapTest {
 fn setup(fee: u16) -> TariswapTest {
     let mut template_test = TemplateTest::new(["./templates/index", "./templates/pool"]);
 
+    // create the pool index
+    let index_component = create_index_component(&mut template_test, fee);
+
     // create the token pair for the swap pool
     let (a_faucet, a_resource) = create_faucet_component(&mut template_test, "A".to_string());
     let (b_faucet, b_resource) = create_faucet_component(&mut template_test, "B".to_string());
 
-    let (tariswap, lp_resource) = create_tariswap_component(&mut template_test, a_resource, b_resource, fee);
+    let (pool_component, lp_resource) = create_pool_component(&mut template_test, a_resource, b_resource, index_component);
 
     let (account_address, account_proof, _) = template_test.create_owned_account();
     fund_account(&mut template_test, account_address, a_faucet);
@@ -37,7 +41,8 @@ fn setup(fee: u16) -> TariswapTest {
         a_resource,
         b_resource,
         lp_resource,
-        tariswap,
+        index_component,
+        pool_component,
         account_address,
         account_proof,
     }
@@ -56,21 +61,29 @@ fn create_faucet_component(template_test: &mut TemplateTest, symbol: String) -> 
     (component_address, resource_address)
 }
 
-fn create_tariswap_component(
+fn create_index_component(template_test: &mut TemplateTest, fee: u16) -> ComponentAddress {
+    let pool_template = template_test.get_template_address("TariswapPool");
+
+    let component_address: ComponentAddress =
+        template_test.call_function("TariswapIndex", "new", args![pool_template, fee], vec![]);
+
+    component_address
+}
+
+fn create_pool_component(
     template_test: &mut TemplateTest,
     a_resource: ResourceAddress,
     b_resource: ResourceAddress,
-    fee: u16,
+    index_component: ComponentAddress
 ) -> (ComponentAddress, ResourceAddress) {
-    let module_name = "TariswapPool";
-    let tariswap_template = template_test.get_template_address(module_name);
+    let pool_module_name = "TariswapPool";
 
     let res = template_test
         .execute_and_commit(
-            vec![Instruction::CallFunction {
-                template_address: tariswap_template,
-                function: "new".to_string(),
-                args: args![a_resource, b_resource, fee],
+            vec![Instruction::CallMethod {
+                component_address: index_component,
+                method: "create_pool".to_string(),
+                args: args![a_resource, b_resource],
             }],
             vec![],
         )
@@ -81,7 +94,7 @@ fn create_tariswap_component(
         .expect_success()
         .up_iter()
         .find(|(address, substate)| {
-            address.is_component() && substate.substate_value().component().unwrap().module_name == module_name
+            address.is_component() && substate.substate_value().component().unwrap().module_name == pool_module_name
         })
         .unwrap();
     let component_address = substate_addr.as_component_address().unwrap();
@@ -137,7 +150,7 @@ fn swap(test: &mut TariswapTest, input_resource: &ResourceAddress, output_resour
                     key: b"input_bucket".to_vec(),
                 },
                 Instruction::CallMethod {
-                    component_address: test.tariswap,
+                    component_address: test.pool_component,
                     method: "swap".to_string(),
                     args: args![Variable("input_bucket"), output_resource],
                 },
@@ -177,7 +190,7 @@ fn add_liquidity(test: &mut TariswapTest, a_amount: Amount, b_amount: Amount) {
                     key: b"b_bucket".to_vec(),
                 },
                 Instruction::CallMethod {
-                    component_address: test.tariswap,
+                    component_address: test.pool_component,
                     method: "add_liquidity".to_string(),
                     args: args![Variable("a_bucket"), Variable("b_bucket")],
                 },
@@ -210,7 +223,7 @@ fn remove_liquidity(test: &mut TariswapTest, lp_amount: Amount) {
                     key: b"lp_bucket".to_vec(),
                 },
                 Instruction::CallMethod {
-                    component_address: test.tariswap,
+                    component_address: test.pool_component,
                     method: "remove_liquidity".to_string(),
                     args: args![Variable("lp_bucket")],
                 },
@@ -237,7 +250,7 @@ fn remove_liquidity(test: &mut TariswapTest, lp_amount: Amount) {
 
 fn get_pool_balance(test: &mut TariswapTest, resource_address: ResourceAddress) -> Amount {
     test.template_test
-        .call_method(test.tariswap, "get_pool_balance", args![resource_address], vec![])
+        .call_method(test.pool_component, "get_pool_balance", args![resource_address], vec![])
 }
 
 fn get_account_balance(test: &mut TariswapTest, resource_address: ResourceAddress) -> Amount {
@@ -335,7 +348,7 @@ fn assert_remove_liquidity(
 }
 
 #[test]
-fn tariswap() {
+fn it_swaps_fungible_tokens() {
     // init the test
     let fee = 50; // 5% market fee
     let mut test = setup(fee);

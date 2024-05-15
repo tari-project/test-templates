@@ -37,12 +37,14 @@ mod tariswap_index {
     }
 
     impl TariswapIndex {
-        pub fn new(pool_template: TemplateAddress, market_fee: u16) -> Self {
-            Self {
+        pub fn new(pool_template: TemplateAddress, market_fee: u16) -> Component<Self> {
+            Component::new(Self {
                 pool_template,
                 pools: BTreeMap::new(),
                 market_fee
-            }
+            })
+            .with_access_rules(AccessRules::allow_all())
+            .create()
         }
 
         // convenience method for external APIs and interfaces
