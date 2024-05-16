@@ -1,4 +1,4 @@
-//   Copyright 2023. The Tari Project
+//   Copyright 2024. The Tari Project
 //
 //   Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
 //   following conditions are met:
@@ -24,17 +24,17 @@ use std::collections::HashMap;
 use tari_template_lib::prelude::*;
 
 #[template]
-mod tariswap {
+mod tariswap_pool {
     use super::*;
 
     // Constant product AMM
-    pub struct TariSwapPool {
+    pub struct TariswapPool {
         pools: HashMap<ResourceAddress, Vault>,
         lp_resource: ResourceAddress,
         fee: u16,
     }
 
-    impl TariSwapPool {
+    impl TariswapPool {
         // Initialises a new pool component for for the pool A - B
         // the fees is represented as a per-mil quantity (e.g. "1" represents "0.1%")
         pub fn new(a_addr: ResourceAddress, b_addr: ResourceAddress, fee: u16) -> Component<Self> {
@@ -189,7 +189,7 @@ mod tariswap {
         pub fn get_pool_ratio(&self, resource: ResourceAddress, amount: Amount) -> Amount {
             let balance = self.get_pool_balance(resource);
 
-            if balance == 0 {
+            if balance.is_zero() {
                 Amount::new(1)
             } else {
                 amount / balance
