@@ -8,9 +8,9 @@ use tari_template_test_tooling::SubstateType;
 use tari_template_test_tooling::TemplateTest;
 use tari_transaction::Transaction;
 
-use tari_engine_types::virtual_substate::{VirtualSubstate, VirtualSubstateAddress};
+use tari_engine_types::virtual_substate::{VirtualSubstate, VirtualSubstateId};
 
-use tari_template_lib::constants::XTR2;
+use tari_template_lib::constants::XTR;
 
 #[test]
 fn auction_period_ends_with_winning_bid() {
@@ -21,7 +21,6 @@ fn auction_period_ends_with_winning_bid() {
         seller_nft_address,
         ..
     } = setup();
-
     
     // create an auction for the NFT
     let auction = AuctionRequest {
@@ -228,7 +227,7 @@ fn it_rejects_invalid_auctions() {
     // we test it by trying to auction a Tari fungible token
     let reason = test.execute_expect_failure(
         Transaction::builder()
-            .call_method(seller.component, "withdraw", args![XTR2, Amount(1)]) // invalid resource
+            .call_method(seller.component, "withdraw", args![XTR, Amount(1)]) // invalid resource
             .put_last_instruction_output_on_workspace("nft_bucket")
             .call_method(
                 auction_index_component,
@@ -398,13 +397,13 @@ fn it_rejects_invalid_bids() {
     );
     assert_reject_reason(
         reason,
-        "Invalid payment resource, the marketplace only accepts Tari (XTR2) tokens",
+        "Invalid payment resource, the marketplace only accepts Tari (XTR) tokens",
     );
 
     // reject if buy price is too low
     let reason = test.execute_expect_failure(
         Transaction::builder()
-            .call_method(bidder.component, "withdraw", args![XTR2, min_price - 1])
+            .call_method(bidder.component, "withdraw", args![XTR, min_price - 1])
             .put_last_instruction_output_on_workspace("payment")
             .call_method(
                 auction_component,
@@ -420,7 +419,7 @@ fn it_rejects_invalid_bids() {
     // reject if buy price is too high (higher than the buy price)
     let reason = test.execute_expect_failure(
         Transaction::builder()
-            .call_method(bidder.component, "withdraw", args![XTR2, buy_price + 1])
+            .call_method(bidder.component, "withdraw", args![XTR, buy_price + 1])
             .put_last_instruction_output_on_workspace("payment")
             .call_method(
                 auction_component,
@@ -436,7 +435,7 @@ fn it_rejects_invalid_bids() {
     // reject if the bidder account is not an account component
     let reason = test.execute_expect_failure(
         Transaction::builder()
-            .call_method(bidder.component, "withdraw", args![XTR2, Amount(1)])
+            .call_method(bidder.component, "withdraw", args![XTR, Amount(1)])
             .put_last_instruction_output_on_workspace("payment")
             // using the bidder's nft component address instead of its account
             .call_method(
@@ -456,7 +455,7 @@ fn it_rejects_invalid_bids() {
     set_epoch(&mut test, auction_period + 1);
     let reason = test.execute_expect_failure(
         Transaction::builder()
-            .call_method(bidder.component, "withdraw", args![XTR2, min_price + 1])
+            .call_method(bidder.component, "withdraw", args![XTR, min_price + 1])
             .put_last_instruction_output_on_workspace("payment")
             .call_method(
                 auction_component,
@@ -542,6 +541,7 @@ fn it_rejects_invalid_auction_cancels() {
 
     // the badge has not been emmited by the marketplace
     let other_nft = mint_account_nft(&mut test, &seller, &account_nft_component);
+
     let reason = test.execute_expect_failure(
         Transaction::builder()
             .call_method(
@@ -560,7 +560,7 @@ fn it_rejects_invalid_auction_cancels() {
         vec![seller.owner_token.clone()],
     );
     assert_reject_reason(reason, "Invalid seller badge");
-
+    
     // reject the cancel if the auction has ended
     set_epoch(&mut test, auction_period + 1);
     let reason = test.execute_expect_failure(
@@ -604,7 +604,7 @@ fn setup() -> TestSetup {
     let auction_template = test.get_template_address("Auction");
 
     // create the seller account
-    let (seller_account, seller_owner_token, seller_key) = test.create_owned_account();
+    let (seller_account, seller_owner_token, seller_key) = test.create_funded_account();
     let seller = Account {
         component: seller_account,
         owner_token: seller_owner_token,
@@ -637,7 +637,7 @@ fn setup() -> TestSetup {
 }
 
 fn create_account(test: &mut TemplateTest) -> Account {
-    let (component, owner_token, key) = test.create_owned_account();
+    let (component, owner_token, key) = test.create_funded_account();
     Account {
         component,
         owner_token,
@@ -664,7 +664,7 @@ fn get_account_balance(
 }
 
 fn get_account_tari_balance(test: &mut TemplateTest, account: &Account) -> Amount {
-    return get_account_balance(test, account, &XTR2);
+    return get_account_balance(test, account, &XTR);
 }
 
 fn create_account_nft_component(test: &mut TemplateTest, account: &Account) -> ComponentAddress {
@@ -766,7 +766,7 @@ struct BidRequest {
 fn bid(test: &mut TemplateTest, req: &BidRequest) {
     test.execute_expect_success(
         Transaction::builder()
-            .call_method(req.bidder.component, "withdraw", args![XTR2, req.bid])
+            .call_method(req.bidder.component, "withdraw", args![XTR, req.bid])
             .put_last_instruction_output_on_workspace("payment")
             .call_method(
                 req.auction,
@@ -781,7 +781,7 @@ fn bid(test: &mut TemplateTest, req: &BidRequest) {
 
 fn set_epoch(test: &mut TemplateTest, new_epoch: u64) {
     test.set_virtual_substate(
-        VirtualSubstateAddress::CurrentEpoch,
+        VirtualSubstateId::CurrentEpoch,
         VirtualSubstate::CurrentEpoch(new_epoch),
     );
 }
