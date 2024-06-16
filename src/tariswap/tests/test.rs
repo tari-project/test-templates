@@ -35,7 +35,7 @@ fn setup(fee: u16) -> TariswapTest {
 
     let (pool_component, lp_resource) = create_pool_component(&mut template_test, a_resource, b_resource, index_component);
 
-    let (account_address, account_proof, _) = template_test.create_owned_account();
+    let (account_address, account_proof, _) = template_test.create_funded_account();
     fund_account(&mut template_test, account_address, a_faucet);
     fund_account(&mut template_test, account_address, b_faucet);
 

@@ -80,7 +80,7 @@ mod nft_marketplace {
             min_price: Option<Amount>,
             buy_price: Option<Amount>,
             epoch_period: u64,
-        ) -> Bucket {
+        ) -> (Component<Auction>, Bucket) {
             assert!(
                 nft_bucket.resource_type() == ResourceType::NonFungible,
                 "The resource is not a NFT"
@@ -99,10 +99,9 @@ mod nft_marketplace {
             // create the bucket with the badge to allow the seller to cancel the auction at any time
             // we make sure that only the initial badge will be minted
             let seller_badge_bucket = ResourceBuilder::non_fungible()
-                .with_non_fungible(NonFungibleId::random(), &(), &())
                 .mintable(AccessRule::DenyAll)
                 .burnable(AccessRule::AllowAll)
-                .build_bucket();
+                .initial_supply_with_data(Some((NonFungibleId::random(), (&(), &()))));
             let seller_badge_resource = seller_badge_bucket.resource_address();
 
             // initialize the auction component
@@ -118,7 +117,7 @@ mod nft_marketplace {
             .with_access_rules(AccessRules::allow_all())
             .create();
 
-            seller_badge_bucket
+            (component, seller_badge_bucket)
         }
 
         // process a new bid for an ongoing auction
@@ -130,8 +129,8 @@ mod nft_marketplace {
 
             assert_eq!(
                 payment.resource_address(),
-                XTR2,
-                "Invalid payment resource, the marketplace only accepts Tari (XTR2) tokens"
+                XTR,
+                "Invalid payment resource, the marketplace only accepts Tari (XTR) tokens"
             );
 
             // validate that the bidder account is really an account
