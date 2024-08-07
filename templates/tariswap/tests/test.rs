@@ -11,6 +11,8 @@ use tari_template_test_tooling::{SubstateType, TemplateTest};
 use tari_template_test_tooling::support::assert_error::assert_reject_reason;
 use tari_transaction::Transaction;
 use tari_template_test_tooling::crypto::RistrettoSecretKey;
+use tari_engine_types::commit_result::ExecuteResult;
+use tari_dan_engine::runtime::AssertError;
 
 struct TariswapTest {
     template_test: TemplateTest,
@@ -140,7 +142,7 @@ fn fund_account(
         .unwrap();
 }
 
-fn swap(test: &mut TariswapTest, input_resource: &ResourceAddress, output_resource: &ResourceAddress, amount: Amount) {
+fn swap(test: &mut TariswapTest, input_resource: &ResourceAddress, output_resource: &ResourceAddress, amount: Amount, expected_output_amount: Amount) -> anyhow::Result<ExecuteResult> {
     test.template_test
         .execute_and_commit(
             vec![
@@ -160,6 +162,11 @@ fn swap(test: &mut TariswapTest, input_resource: &ResourceAddress, output_resour
                 Instruction::PutLastInstructionOutputOnWorkspace {
                     key: b"output_bucket".to_vec(),
                 },
+                Instruction::AssertBucketContains {
+                    key: b"output_bucket".to_vec(),
+                    resource_address: *output_resource,
+                    min_amount: expected_output_amount,
+                },
                 Instruction::CallMethod {
                     component_address: test.account_address,
                     method: "deposit".to_string(),
@@ -169,7 +176,6 @@ fn swap(test: &mut TariswapTest, input_resource: &ResourceAddress, output_resour
             // proof needed to withdraw
             vec![test.account_proof.clone()],
         )
-        .unwrap();
 }
 
 fn add_liquidity(test: &mut TariswapTest, a_amount: Amount, b_amount: Amount) {
@@ -277,7 +283,7 @@ fn assert_swap(
     let output_pool_balance = get_pool_balance(test, *output_resource);
 
     // call the component
-    swap(test, input_resource, output_resource, input_amount);
+    swap(test, input_resource, output_resource, input_amount, expected_output_amount).unwrap();
 
     // check that the new pool balances are expected
     let new_input_pool_balance = get_pool_balance(test, *input_resource);
@@ -403,6 +409,36 @@ fn it_detects_existing_pools() {
     let (_, c_resource) = create_faucet_component(&mut test.template_test, "C".to_string());
     let c_transaction = new_pool_transaction(&mut test, a_resource, c_resource);
     test.template_test.execute_expect_success(c_transaction, vec![]);
+}
+
+#[test]
+fn it_fails_when_max_slippage_exceeded() {
+    // init the test
+    let fee = 50; // 5% market fee
+    let mut test = setup(fee);
+
+    // copy the resource addresses to keep the borrow checker happy
+    let a_resource = test.a_resource;
+    let b_resource = test.b_resource;
+
+    // add some liquidity
+    let liquidity_amount = 500;
+    let expected_lp_amount = liquidity_amount * 2; // we provided both "a" and "b" tokens
+    assert_add_liquidity(&mut test, liquidity_amount, liquidity_amount, expected_lp_amount);
+
+    // let's do a swap, giving "A" tokens for "B" tokens
+    // create the amount objects
+    let a_amount = Amount::new(50);
+    let expected_b_amount = Amount::new(44);
+
+    // we are going to use a max slippage that is not going to be satisfied
+    let excessive_b_amount = expected_b_amount + 1;
+ 
+    // the swap should fail with a assertion error
+    let res = swap(&mut test, &a_resource, &b_resource, a_amount, excessive_b_amount);
+    assert!(res.is_err());
+    let expected_error_message = AssertError::InvalidAmount { expected: excessive_b_amount, got: expected_b_amount};
+    assert!(res.err().unwrap().to_string().contains(&expected_error_message.to_string()));
 }
 
 fn assert_duplicated_pool_error(

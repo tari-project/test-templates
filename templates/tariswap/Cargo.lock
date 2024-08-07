@@ -2482,8 +2482,10 @@ dependencies = [
 name = "tariswap"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "serde",
  "tari_bor",
+ "tari_dan_engine",
  "tari_engine_types",
  "tari_template_lib",
  "tari_template_test_tooling",
