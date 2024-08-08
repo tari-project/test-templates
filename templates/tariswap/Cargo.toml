@@ -13,3 +13,5 @@ tari_template_test_tooling = { git = "https://github.com/tari-project/tari-dan.g
 tari_transaction = { git = "https://github.com/tari-project/tari-dan.git", branch = "development" }
 tari_bor = { git = "https://github.com/tari-project/tari-dan.git", branch = "development" }
 tari_engine_types = { git = "https://github.com/tari-project/tari-dan.git", branch = "development" }
+tari_dan_engine = { git = "https://github.com/tari-project/tari-dan.git", branch = "development" }
+anyhow = "1.0.86"
