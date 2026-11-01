@@ -93,6 +93,19 @@ mod nft_marketplace {
 
             assert!(epoch_period > 0, "Invalid auction period");
 
+            if let Some(min_price) = min_price {
+                assert!(min_price > Amount::zero(), "Invalid minimum price");
+            }
+            if let Some(buy_price) = buy_price {
+                assert!(buy_price > Amount::zero(), "Invalid buy price");
+            }
+            if let (Some(min_price), Some(buy_price)) = (min_price, buy_price) {
+                assert!(
+                    buy_price >= min_price,
+                    "Buy price cannot be lower than minimum price"
+                );
+            }
+
             // needed to ensure that we can process the auction payments when it ends
             Self::assert_component_is_account(seller_address);
 
@@ -123,6 +136,11 @@ mod nft_marketplace {
         // process a new bid for an ongoing auction
         pub fn bid(&mut self, bidder_account_address: ComponentAddress, payment: Bucket) {
             assert!(
+                !self.vault.balance().is_zero(),
+                "Auction has already finished"
+            );
+
+            assert!(
                 Consensus::current_epoch() < self.ending_epoch,
                 "Auction has expired"
             );
@@ -140,6 +158,10 @@ mod nft_marketplace {
 
             // check that the minimum price (if set) is met
             let payment_amount = payment.amount();
+            assert!(
+                payment_amount > Amount::zero(),
+                "Bid amount must be greater than zero"
+            );
             if let Some(min_price) = self.min_price {
                 assert!(payment_amount >= min_price, "Minimum price not met");
             }
@@ -183,6 +205,11 @@ mod nft_marketplace {
         // used by a bid seller to receive the bid payment, or by the buyer to get the NFT, whatever happens first
         pub fn finish(&mut self) {
             assert!(
+                !self.vault.balance().is_zero(),
+                "Auction has already finished"
+            );
+
+            assert!(
                 Consensus::current_epoch() >= self.ending_epoch,
                 "Auction is still in progress"
             );
@@ -192,10 +219,16 @@ mod nft_marketplace {
 
         // the seller wants to cancel the auction
         pub fn cancel(&mut self, seller_badge_bucket: Bucket) {
-            // as the seller badge resource cannot be minted and only one token exist,
-            // we only need to check that the resource address matches
             assert!(
-                seller_badge_bucket.resource_address() == self.seller_badge_resource,
+                !self.vault.balance().is_zero(),
+                "Auction has already finished"
+            );
+
+            // as the seller badge resource cannot be minted and only one token exist,
+            // we check that the resource address matches and the bucket contains the badge
+            assert!(
+                seller_badge_bucket.resource_address() == self.seller_badge_resource
+                    && seller_badge_bucket.amount() == Amount(1),
                 "Invalid seller badge"
             );
 

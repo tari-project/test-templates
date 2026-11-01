@@ -441,6 +441,19 @@ fn it_fails_when_max_slippage_exceeded() {
     assert!(res.err().unwrap().to_string().contains(&expected_error_message.to_string()));
 }
 
+#[test]
+fn it_rejects_zero_amount_swap_and_liquidity() {
+    let fee = 50;
+    let mut test = setup(fee);
+    let a_resource = test.a_resource;
+    let b_resource = test.b_resource;
+
+    assert_add_liquidity(&mut test, 500, 500, 1000);
+
+    let res = swap(&mut test, &a_resource, &b_resource, Amount::zero(), Amount::zero());
+    assert!(res.is_err());
+}
+
 fn assert_duplicated_pool_error(
     test: &mut TariswapTest,
     a_resource: ResourceAddress,

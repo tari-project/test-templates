@@ -158,6 +158,23 @@ fn auction_finishes_by_buying_price_bid() {
     // the seller received the bid payment
     let seller_balance_after_sell = get_account_tari_balance(&mut test, &seller);
     assert_eq!(seller_balance_after_sell, seller_balance + buy_price);
+
+    // subsequent bids on a settled auction must be rejected
+    let bidder2 = create_account(&mut test);
+    let reason = test.execute_expect_failure(
+        Transaction::builder()
+            .call_method(bidder2.component, "withdraw", args![XTR, buy_price])
+            .put_last_instruction_output_on_workspace("payment")
+            .call_method(
+                auction_component,
+                "bid",
+                args![bidder2.component, Workspace("payment")],
+            )
+            .sign(&bidder2.key)
+            .build(),
+        vec![bidder2.owner_token.clone()],
+    );
+    assert_reject_reason(reason, "Auction has already finished");
 }
 
 #[test]
@@ -348,6 +365,70 @@ fn it_rejects_invalid_auctions() {
         vec![seller.owner_token.clone()],
     );
     assert_reject_reason(reason, "Invalid bidder account");
+
+    // reject if minimum price is zero
+    let reason = test.execute_expect_failure(
+        Transaction::builder()
+            .call_method(
+                seller.component,
+                "withdraw",
+                args![seller_nft_address.resource_address(), Amount(1)],
+            )
+            .put_last_instruction_output_on_workspace("nft_bucket")
+            .call_method(
+                auction_index_component,
+                "create_auction",
+                args![
+                    Workspace("nft_bucket"),
+                    seller.component,
+                    Some(Amount(0)),
+                    None::<Amount>,
+                    10
+                ],
+            )
+            .put_last_instruction_output_on_workspace("seller_badge")
+            .call_method(
+                seller.component,
+                "deposit",
+                args![Workspace("seller_badge")],
+            )
+            .sign(&seller.key)
+            .build(),
+        vec![seller.owner_token.clone()],
+    );
+    assert_reject_reason(reason, "Invalid minimum price");
+
+    // reject if buy price is lower than minimum price
+    let reason = test.execute_expect_failure(
+        Transaction::builder()
+            .call_method(
+                seller.component,
+                "withdraw",
+                args![seller_nft_address.resource_address(), Amount(1)],
+            )
+            .put_last_instruction_output_on_workspace("nft_bucket")
+            .call_method(
+                auction_index_component,
+                "create_auction",
+                args![
+                    Workspace("nft_bucket"),
+                    seller.component,
+                    Some(Amount(200)),
+                    Some(Amount(100)),
+                    10
+                ],
+            )
+            .put_last_instruction_output_on_workspace("seller_badge")
+            .call_method(
+                seller.component,
+                "deposit",
+                args![Workspace("seller_badge")],
+            )
+            .sign(&seller.key)
+            .build(),
+        vec![seller.owner_token.clone()],
+    );
+    assert_reject_reason(reason, "Buy price cannot be lower than minimum price");
 }
 
 #[test]
@@ -554,6 +635,26 @@ fn it_rejects_invalid_auction_cancels() {
                 auction_component,
                 "cancel",
                 args![Workspace("invalid_badge")],
+            )
+            .sign(&seller.key)
+            .build(),
+        vec![seller.owner_token.clone()],
+    );
+    assert_reject_reason(reason, "Invalid seller badge");
+
+    // reject if the seller badge bucket is empty
+    let reason = test.execute_expect_failure(
+        Transaction::builder()
+            .call_method(
+                seller.component,
+                "withdraw",
+                args![badge.resource_address(), Amount(0)],
+            )
+            .put_last_instruction_output_on_workspace("empty_badge")
+            .call_method(
+                auction_component,
+                "cancel",
+                args![Workspace("empty_badge")],
             )
             .sign(&seller.key)
             .build(),
