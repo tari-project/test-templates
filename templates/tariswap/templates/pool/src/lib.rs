@@ -71,6 +71,10 @@ mod tariswap_pool {
             // check that the parameters are correct
             let input_resource = input_bucket.resource_address();
             self.check_pool_resources(input_resource, output_resource);
+            assert!(
+                input_bucket.amount() > Amount::zero(),
+                "The input bucket amount must be greater than zero"
+            );
 
             // get the data needed to calculate the pool rebalancing
             let input_pool_balance = self.get_pool_balance(input_resource);
@@ -121,6 +125,10 @@ mod tariswap_pool {
             // extract the bucket amounts for later
             let a_amount = a_bucket.amount();
             let b_amount = b_bucket.amount();
+            assert!(
+                a_amount > Amount::zero() && b_amount > Amount::zero(),
+                "The liquidity amounts must be greater than zero"
+            );
 
             // add the liquidity to the pool
             self.pools.get_mut(&a_resource).unwrap().deposit(a_bucket);
@@ -139,6 +147,12 @@ mod tariswap_pool {
 
         pub fn remove_liquidity(&mut self, lp_bucket: Bucket) -> (Bucket, Bucket) {
             assert!(lp_bucket.resource_address() == self.lp_resource, "Invalid LP resource");
+            assert!(
+                lp_bucket.amount() > Amount::zero(),
+                "The LP bucket amount must be greater than zero"
+            );
+            let total_supply = self.lp_total_supply();
+            assert!(!total_supply.is_zero(), "The LP pool is empty");
 
             // get the pool information
             let a_resource = self.get_a_resource();
@@ -147,7 +161,7 @@ mod tariswap_pool {
             let b_balance = self.get_pool_balance(b_resource).value() as f64;
 
             // calculate the amount of tokens to take from each pool
-            let lp_ratio = lp_bucket.amount().value() as f64 / self.lp_total_supply().value() as f64;
+            let lp_ratio = lp_bucket.amount().value() as f64 / total_supply.value() as f64;
             let a_amount = Amount::new((lp_ratio * a_balance).ceil() as i64);
             let b_amount = Amount::new((lp_ratio * b_balance).ceil() as i64);
 
